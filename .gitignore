@@ -1,0 +1,92 @@
+# QumenX repository hygiene
+# Generated binaries stay out of Git; .gitkeep, checksums, manifests and notes stay tracked.
+
+# Dependencies and package caches
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.vite/
+.eslintcache
+*.tsbuildinfo
+
+# Generated frontend and Rust output
+dist/
+dist-ssr/
+target/
+QumenX/dist/
+QumenX/src-tauri/target/
+QumenX/src-tauri/gen/
+
+# Logs and local state
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.local
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Credentials and signing material
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+*.cer
+*.snk
+
+# Downloaded/build-generated Windows binaries and archives
+*.exe
+*.msi
+*.zip
+*.7z
+rustup-init.exe
+
+# Build output tree: keep placeholders, ignore generated contents
+/builds/development/*
+!/builds/development/.gitkeep
+/builds/production/*
+!/builds/production/.gitkeep
+
+# Release binaries: keep placeholders, checksums and manifests
+/releases/windows/installers/*
+!/releases/windows/installers/.gitkeep
+/releases/windows/portable/*
+!/releases/windows/portable/.gitkeep
+/releases/windows/executables/*
+!/releases/windows/executables/.gitkeep
+
+# Scratch directories and partial downloads (source media is not ignored globally)
+/.cache/
+/.tmp/
+/temp/
+/tmp/
+/Temp/
+/QumenX/.cache/
+/QumenX/.tmp/
+/QumenX/temp/
+/QumenX/tmp/
+*.part
+*.crdownload
+
+# Local QA fixtures and captures (generated during E2E runs)
+/QumenX/test-*
+/QumenX/desktop-screenshot.png

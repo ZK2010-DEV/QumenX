@@ -1,0 +1,31 @@
+{
+    "product":  "QumenX",
+    "version":  "1.0.0",
+    "released":  "2026-11-24",
+    "platform":  "windows-x86_64",
+    "checksums":  "releases/windows/checksums/SHA256SUMS.txt",
+    "releaseNotes":  "releases/release-notes/v1.0.0.md",
+    "artifacts":  [
+                      {
+                          "kind":  "executable",
+                          "name":  "qumenx.exe",
+                          "path":  "releases/windows/executables/qumenx.exe",
+                          "sha256":  "7b5fa1ec6de0f75c5f599ee1c858a91e40c8cec96589cee6b8256579f7358286",
+                          "bytes":  11761427
+                      },
+                      {
+                          "kind":  "msi",
+                          "name":  "QumenX_1.0.0_x64_en-US.msi",
+                          "path":  "releases/windows/installers/QumenX_1.0.0_x64_en-US.msi",
+                          "sha256":  "35871e41659c7a3e21f470376db5d75d1f110597bb55a2cdb2c50773934cde1f",
+                          "bytes":  4493312
+                      },
+                      {
+                          "kind":  "nsis",
+                          "name":  "QumenX_1.0.0_x64-setup.exe",
+                          "path":  "releases/windows/installers/QumenX_1.0.0_x64-setup.exe",
+                          "sha256":  "f08183c668c1f42c2480e4012fdfa6fb54464fde605e35404014ec96f960c084",
+                          "bytes":  3134057
+                      }
+                  ]
+}

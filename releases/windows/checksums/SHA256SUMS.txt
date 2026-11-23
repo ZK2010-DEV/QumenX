@@ -1,0 +1,6 @@
+# QumenX 1.0.0 - SHA256 checksums
+# Format: <sha256>  <path relative to repository root>
+
+7b5fa1ec6de0f75c5f599ee1c858a91e40c8cec96589cee6b8256579f7358286  releases/windows/executables/qumenx.exe
+35871e41659c7a3e21f470376db5d75d1f110597bb55a2cdb2c50773934cde1f  releases/windows/installers/QumenX_1.0.0_x64_en-US.msi
+f08183c668c1f42c2480e4012fdfa6fb54464fde605e35404014ec96f960c084  releases/windows/installers/QumenX_1.0.0_x64-setup.exe
