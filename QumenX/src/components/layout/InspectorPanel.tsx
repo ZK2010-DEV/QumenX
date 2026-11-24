@@ -15,9 +15,10 @@ import {
   PanelRight,
 } from "lucide-react";
 import {
-  type Clip, type EffectKind, type KeyframeProperty,
+  type AudioDsp, type Clip, type EffectKind, type KeyframeProperty,
   type TextAnimationKind, type TransitionKind, DEFAULT_TEXT,
 } from "@/types/project";
+import { AUDIO_DSP_PRESETS, audioDspIsActive, resolveAudioDsp } from "@/lib/audioDsp";
 import { cn } from "@/lib/utils";
 
 type Tab = "transform" | "color" | "audio" | "text" | "keyframes" | "actions";
@@ -66,6 +67,10 @@ export function InspectorPanel() {
 
   const clip = project.clips.find((c) => c.id === selectedClipId) ?? null;
   const asset = clip ? assets.find((a) => a.id === clip.assetId) : undefined;
+  const dsp = resolveAudioDsp(clip?.audioDsp);
+  const setDsp = (patch: Partial<AudioDsp>) => {
+    if (clip) updateClip(clip.id, { audioDsp: { ...dsp, ...patch } });
+  };
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -167,6 +172,7 @@ export function InspectorPanel() {
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
+            data-testid={`inspector-tab-${t.id}`}
             data-active={tab === t.id}
             className={cn(
               "shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors",
@@ -300,6 +306,65 @@ export function InspectorPanel() {
                   onChange={(v) => updateClip(clip.id, { audioFadeIn: v })} />
                 <SliderRow label="Fade out (s)" value={Math.round((clip.audioFadeOut ?? 0) * 10) / 10} min={0} max={10} step={0.1}
                   onChange={(v) => updateClip(clip.id, { audioFadeOut: v })} />
+              </div>
+            </Collapsible>
+
+            <Collapsible title="Audio processing" defaultOpen={false}>
+              <div className="space-y-2.5">
+                <Button className="w-full" size="sm" variant={dsp.enabled ? "default" : "outline"}
+                  onClick={() => setDsp({ enabled: !dsp.enabled })}>
+                  <SlidersHorizontal className="mr-1 h-3 w-3" />
+                  {dsp.enabled ? "Processing on" : "Processing off"}
+                </Button>
+                <div className="grid grid-cols-2 gap-1">
+                  {AUDIO_DSP_PRESETS.map((preset) => (
+                    <Button key={preset.id} size="sm" variant="outline" className="text-[10px]"
+                      onClick={() => updateClip(clip!.id, { audioDsp: { ...preset.dsp } })}>
+                      {preset.label}
+                    </Button>
+                  ))}
+                  <Button size="sm" variant="ghost" className="col-span-2 text-[10px]"
+                    onClick={() => updateClip(clip!.id, { audioDsp: { ...resolveAudioDsp(null) } })}>
+                    Reset DSP
+                  </Button>
+                </div>
+                {audioDspIsActive(dsp) ? (
+                  <>
+                    <SliderRow label="High-pass (Hz)" value={dsp.highpassHz} min={0} max={2000} step={10}
+                      onChange={(v) => setDsp({ highpassHz: v })} />
+                    <SliderRow label="Low-pass (Hz)" value={dsp.lowpassHz} min={0} max={20000} step={100}
+                      onChange={(v) => setDsp({ lowpassHz: v })} />
+                    <SliderRow label="Low EQ (dB)" value={dsp.lowGainDb} min={-12} max={12} step={0.5}
+                      onChange={(v) => setDsp({ lowGainDb: v })} />
+                    <SliderRow label="Mid EQ (dB)" value={dsp.midGainDb} min={-12} max={12} step={0.5}
+                      onChange={(v) => setDsp({ midGainDb: v })} />
+                    <SliderRow label="High EQ (dB)" value={dsp.highGainDb} min={-12} max={12} step={0.5}
+                      onChange={(v) => setDsp({ highGainDb: v })} />
+                    <Button className="w-full" size="sm" variant={dsp.compressor ? "default" : "outline"}
+                      onClick={() => setDsp({ compressor: !dsp.compressor })}>
+                      {dsp.compressor ? "Compressor on" : "Compressor off"}
+                    </Button>
+                    {dsp.compressor ? (
+                      <>
+                        <SliderRow label="Threshold (dB)" value={dsp.thresholdDb} min={-60} max={0} step={1}
+                          onChange={(v) => setDsp({ thresholdDb: v })} />
+                        <SliderRow label="Ratio" value={dsp.ratio} min={1} max={20} step={0.5}
+                          onChange={(v) => setDsp({ ratio: v })} />
+                        <SliderRow label="Attack (ms)" value={dsp.attackMs} min={1} max={200} step={1}
+                          onChange={(v) => setDsp({ attackMs: v })} />
+                        <SliderRow label="Release (ms)" value={dsp.releaseMs} min={10} max={2000} step={10}
+                          onChange={(v) => setDsp({ releaseMs: v })} />
+                      </>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="text-[10px] leading-relaxed text-editor-textMuted">
+                    Turn processing on or choose a preset to add local EQ, filters and dynamics.
+                  </p>
+                )}
+                <p className="text-[9px] leading-relaxed text-editor-textMuted">
+                  Processing is applied to this clip in preview and in exported audio. No uploads or paid services.
+                </p>
               </div>
             </Collapsible>
 

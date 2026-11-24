@@ -50,6 +50,21 @@ struct Freeze {
 }
 
 #[derive(Clone, Default)]
+struct AudioDsp {
+    enabled: bool,
+    highpass_hz: f64,
+    lowpass_hz: f64,
+    low_gain_db: f64,
+    mid_gain_db: f64,
+    high_gain_db: f64,
+    compressor: bool,
+    threshold_db: f64,
+    ratio: f64,
+    attack_ms: f64,
+    release_ms: f64,
+}
+
+#[derive(Clone, Default)]
 struct TextStyle {
     text: String,
     font_family: String,
@@ -106,6 +121,7 @@ struct ClipDef {
     asset_width: i32,
     asset_height: i32,
     freeze: Option<Freeze>,
+    audio_dsp: AudioDsp,
     keyframes: HashMap<String, Vec<Kf>>,
     effects: Vec<Effect>,
     transition_in: Option<Transition>,
@@ -126,6 +142,29 @@ fn text(v: Option<&Value>, default: &str) -> String {
 }
 fn boolean(v: Option<&Value>, default: bool) -> bool {
     v.and_then(|x| x.as_bool()).unwrap_or(default)
+}
+
+fn parse_audio_dsp(v: Option<&Value>) -> AudioDsp {
+    let mut dsp = AudioDsp {
+        threshold_db: -18.0,
+        ratio: 3.0,
+        attack_ms: 10.0,
+        release_ms: 180.0,
+        ..AudioDsp::default()
+    };
+    let Some(o) = v.and_then(|x| x.as_object()) else { return dsp; };
+    dsp.enabled = boolean(o.get("enabled"), false);
+    dsp.highpass_hz = num(o.get("highpassHz"), 0.0).clamp(0.0, 5000.0);
+    dsp.lowpass_hz = num(o.get("lowpassHz"), 0.0).clamp(0.0, 22050.0);
+    dsp.low_gain_db = num(o.get("lowGainDb"), 0.0).clamp(-24.0, 24.0);
+    dsp.mid_gain_db = num(o.get("midGainDb"), 0.0).clamp(-24.0, 24.0);
+    dsp.high_gain_db = num(o.get("highGainDb"), 0.0).clamp(-24.0, 24.0);
+    dsp.compressor = boolean(o.get("compressor"), false);
+    dsp.threshold_db = num(o.get("thresholdDb"), -18.0).clamp(-60.0, 0.0);
+    dsp.ratio = num(o.get("ratio"), 3.0).clamp(1.0, 20.0);
+    dsp.attack_ms = num(o.get("attackMs"), 10.0).clamp(1.0, 200.0);
+    dsp.release_ms = num(o.get("releaseMs"), 180.0).clamp(10.0, 2000.0);
+    dsp
 }
 
 fn collect_clips(project: &Value) -> Result<(Vec<ClipDef>, f64), String> {
@@ -292,6 +331,7 @@ fn collect_clips(project: &Value) -> Result<(Vec<ClipDef>, f64), String> {
                 asset_width: int(asset.get("width"), 0) as i32,
                 asset_height: int(asset.get("height"), 0) as i32,
                 freeze,
+                audio_dsp: parse_audio_dsp(c.get("audioDsp")),
                 keyframes,
                 effects,
                 transition_in: parse_transition(c.get("transitionIn").or_else(|| c.get("transition_in"))),
@@ -326,6 +366,51 @@ fn collect_clips(project: &Value) -> Result<(Vec<ClipDef>, f64), String> {
 fn fnum(x: f64) -> String {
     let s = format!("{:.5}", x);
     s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// FFmpeg audio filter segment for a clip's local DSP settings.
+fn audio_dsp_filters(dsp: &AudioDsp) -> String {
+    if !dsp.enabled {
+        return String::new();
+    }
+    let mut chain = String::new();
+    if dsp.highpass_hz > 20.0 {
+        chain.push_str(&format!(",highpass=f={}", fnum(dsp.highpass_hz)));
+    }
+    if dsp.lowpass_hz > 100.0
+        && dsp.lowpass_hz < 22000.0
+        && (dsp.highpass_hz <= 20.0 || dsp.lowpass_hz > dsp.highpass_hz + 100.0)
+    {
+        chain.push_str(&format!(",lowpass=f={}", fnum(dsp.lowpass_hz)));
+    }
+    if dsp.low_gain_db.abs() > 0.05 {
+        chain.push_str(&format!(
+            ",lowshelf=f=160:width_type=q:width=1:g={}",
+            fnum(dsp.low_gain_db)
+        ));
+    }
+    if dsp.mid_gain_db.abs() > 0.05 {
+        chain.push_str(&format!(
+            ",equalizer=f=1000:t=q:w=1:g={}",
+            fnum(dsp.mid_gain_db)
+        ));
+    }
+    if dsp.high_gain_db.abs() > 0.05 {
+        chain.push_str(&format!(
+            ",highshelf=f=8000:width_type=q:width=1:g={}",
+            fnum(dsp.high_gain_db)
+        ));
+    }
+    if dsp.compressor {
+        chain.push_str(&format!(
+            ",acompressor=threshold={}dB:ratio={}:attack={}:release={}",
+            fnum(dsp.threshold_db),
+            fnum(dsp.ratio),
+            fnum(dsp.attack_ms),
+            fnum(dsp.release_ms),
+        ));
+    }
+    chain
 }
 
 /// Build a `clamp`/`if` interpolation expression over keyframes.
@@ -1014,6 +1099,7 @@ fn build_audio_filters(clip: &ClipDef, has_stream: bool) -> Option<String> {
         }
         chain.push_str(&format!(",atempo={}", fnum(remaining)));
     }
+    chain.push_str(&audio_dsp_filters(&clip.audio_dsp));
     let vol_kfs = clip.keyframes.get("volume").cloned().unwrap_or_default();
     let volume = interp(&vol_kfs, "t", clip.volume);
     chain.push_str(&format!(",volume='{}'", volume));
@@ -1350,4 +1436,44 @@ fn has_audio_stream(path: &str) -> bool {
 pub fn ffmpeg_cancel_export() -> Result<(), String> {
     CANCEL_REQUESTED.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn audio_dsp_filters_build_real_chain() {
+        let raw = json!({
+            "enabled": true,
+            "highpassHz": 90,
+            "lowpassHz": 12000,
+            "lowGainDb": -3,
+            "midGainDb": 2,
+            "highGainDb": 4,
+            "compressor": true,
+            "thresholdDb": -18,
+            "ratio": 3,
+            "attackMs": 10,
+            "releaseMs": 180
+        });
+        let chain = audio_dsp_filters(&parse_audio_dsp(Some(&raw)));
+        assert!(chain.contains("highpass=f=90"), "{}", chain);
+        assert!(chain.contains("lowpass=f=12000"), "{}", chain);
+        assert!(chain.contains("lowshelf=f=160:width_type=q:width=1:g=-3"), "{}", chain);
+        assert!(chain.contains("equalizer=f=1000:t=q:w=1:g=2"), "{}", chain);
+        assert!(chain.contains("highshelf=f=8000:width_type=q:width=1:g=4"), "{}", chain);
+        assert!(
+            chain.contains("acompressor=threshold=-18dB:ratio=3:attack=10:release=180"),
+            "{}",
+            chain
+        );
+    }
+
+    #[test]
+    fn audio_dsp_disabled_emits_no_filters() {
+        let raw = json!({ "enabled": false, "highpassHz": 90, "compressor": true });
+        assert!(audio_dsp_filters(&parse_audio_dsp(Some(&raw))).is_empty());
+    }
 }

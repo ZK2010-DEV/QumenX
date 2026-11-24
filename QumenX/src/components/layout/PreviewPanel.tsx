@@ -16,6 +16,7 @@ import {
   type Clip, type Asset, type TextStyle, type Track,
 } from "@/types/project";
 import { cn } from "@/lib/utils";
+import { applyPreviewAudioDsp, disposePreviewAudioDsp, resolveAudioDsp } from "@/lib/audioDsp";
 import { IconButton, Segmented } from "@/components/ui/primitives";
 
 interface RenderLayer {
@@ -67,6 +68,8 @@ export function PreviewPanel() {
   const stageRef = React.useRef<HTMLDivElement>(null);
   const mediaRefs = React.useRef<Map<string, HTMLMediaElement>>(new Map());
   const [stageScale, setStageScale] = React.useState(1);
+
+  React.useEffect(() => disposePreviewAudioDsp, []);
 
   const aspect = ASPECT_RATIOS.find((a) => a.value === aspectRatio) ?? ASPECT_RATIOS[0];
   const designW = aspect.w;
@@ -191,8 +194,16 @@ export function PreviewPanel() {
       const fadeOut = clip.audioFadeOut ?? 0;
       if (fadeIn > 0 && local < fadeIn) gain *= local / fadeIn;
       if (fadeOut > 0 && local > clip.duration - fadeOut) gain *= Math.max(0, (clip.duration - local) / fadeOut);
-      el.muted = gain <= 0.001;
-      el.volume = Math.max(0, Math.min(1, gain));
+      const graphManaged = !!asset && (asset.type === "audio" || asset.hasAudio)
+        && applyPreviewAudioDsp(el, resolveAudioDsp(clip.audioDsp), preview.isPlaying, gain);
+      if (graphManaged) {
+        // The Web Audio graph owns playback gain once DSP is connected.
+        el.muted = false;
+        el.volume = 1;
+      } else {
+        el.muted = gain <= 0.001;
+        el.volume = Math.max(0, Math.min(1, gain));
+      }
     }
     void now;
   };

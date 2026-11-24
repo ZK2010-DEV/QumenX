@@ -33,7 +33,7 @@ function clip(o) {
     muted: o.muted ?? false, volume: o.volume ?? 1, zIndex: o.zIndex ?? 0,
     transitionIn: o.transitionIn, transitionOut: o.transitionOut,
     fadeIn: o.fadeIn, fadeOut: o.fadeOut, audioFadeIn: o.audioFadeIn,
-    audioFadeOut: o.audioFadeOut, text: o.text,
+    audioFadeOut: o.audioFadeOut, audioDsp: o.audioDsp, text: o.text,
     freeze: o.freeze, groupId: o.groupId,
   };
 }
@@ -100,6 +100,24 @@ function cropYavg(file, time, w = 32, h = 32, x = 0, y = 0) {
   ], { encoding: 'utf8' });
   const match = out.match(/lavfi\.signalstats\.YAVG=([\d.]+)/);
   return match ? Number(match[1]) : NaN;
+}
+
+function audioLevel(file, filter = '') {
+  const af = filter ? `${filter},volumedetect` : 'volumedetect';
+  const r = spawnSync('ffmpeg', [
+    '-hide_banner', '-nostats', '-i', file, '-vn', '-af', af, '-f', 'null', '-',
+  ], { encoding: 'utf8' });
+  const text = `${r.stdout || ''}\n${r.stderr || ''}`;
+  const mean = text.match(/mean_volume:\s*(-?[\d.]+|-inf) dB/);
+  const max = text.match(/max_volume:\s*(-?[\d.]+|-inf) dB/);
+  return {
+    mean: mean ? Number(mean[1]) : NaN,
+    max: max ? Number(max[1]) : NaN,
+  };
+}
+
+function bandLevel(file, frequency) {
+  return audioLevel(file, `bandpass=f=${frequency}:width_type=q:width=8`).mean;
 }
 
 function clipStart(clips, id) {
@@ -965,6 +983,110 @@ async function main() {
       export: summarize(info),
     });
   } catch (e) { record('TEST 15 project templates', false, String(e)); }
+
+  // TEST 16 — per-clip audio DSP in preview data, persistence and real export --
+  try {
+    const dspSource = path.join(tmp, 'dsp-tones.wav');
+    execFileSync('ffmpeg', [
+      '-y', '-hide_banner', '-loglevel', 'error',
+      '-f', 'lavfi', '-i', 'sine=frequency=160:sample_rate=48000:duration=2',
+      '-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=48000:duration=2',
+      '-f', 'lavfi', '-i', 'sine=frequency=8000:sample_rate=48000:duration=2',
+      '-filter_complex', '[0:a][1:a][2:a]amix=inputs=3:duration=longest:dropout_transition=0[a]',
+      '-map', '[a]', '-c:a', 'pcm_s16le', dspSource,
+    ]);
+    const dspOn = {
+      enabled: true, highpassHz: 0, lowpassHz: 0,
+      lowGainDb: 6, midGainDb: -6, highGainDb: 12,
+      compressor: false, thresholdDb: -18, ratio: 3, attackMs: 10, releaseMs: 180,
+    };
+    const dspBase = {
+      assets: [
+        asset('dsp-video', 'video', video2, 2),
+        asset('dsp-audio', 'audio', dspSource, 2),
+      ],
+      tracks: [vtrack, atrack],
+      clips: [
+        clip({ id: 'dsp-video-clip', trackId: 'tv', assetId: 'dsp-video', start: 0, duration: 2 }),
+        clip({ id: 'dsp-audio-clip', trackId: 'ta', assetId: 'dsp-audio', start: 0, duration: 2 }),
+      ],
+    };
+    const offProject = project({
+      ...dspBase,
+      clips: dspBase.clips.map(c => c.id === 'dsp-audio-clip'
+        ? { ...c, audioDsp: { ...dspOn, enabled: false } } : c),
+    });
+    const onProject = project({
+      ...dspBase,
+      clips: dspBase.clips.map(c => c.id === 'dsp-audio-clip'
+        ? { ...c, audioDsp: dspOn } : c),
+    });
+    const offExport = await exportProject(offProject, 'test16-dsp-off');
+    const onExport = await exportProject(onProject, 'test16-dsp-on');
+    const offLow = bandLevel(offExport.out, 160);
+    const offMid = bandLevel(offExport.out, 1000);
+    const offHigh = bandLevel(offExport.out, 8000);
+    const onLow = bandLevel(onExport.out, 160);
+    const onMid = bandLevel(onExport.out, 1000);
+    const onHigh = bandLevel(onExport.out, 8000);
+    const highDelta = onHigh - offHigh;
+    const midDelta = onMid - offMid;
+    const lowDelta = onLow - offLow;
+
+    const dspProjectPath = path.join(tmp, 'dsp-project.json');
+    const saved = await invoke('project_save', { project_json: JSON.stringify(onProject), file_path: dspProjectPath });
+    const opened = await invoke('project_open', { file_path: dspProjectPath });
+    const reopened = opened.ok ? JSON.parse(opened.value) : {};
+    const reopenedDsp = (reopened.clips || []).find(c => c.id === 'dsp-audio-clip')?.audioDsp;
+
+    await evaluate(`(() => {
+      const s = window.__QUMENX_STORES__;
+      s.project.getState().setProject(${JSON.stringify(onProject)});
+      s.media.getState().setAssets(${JSON.stringify(onProject.assets)});
+      s.timeline.getState().setSelectedClip('dsp-audio-clip');
+      return true;
+    })()`);
+    await new Promise(r => setTimeout(r, 150));
+    const tabClicked = await evaluate(`(() => {
+      const b = document.querySelector('[data-testid="inspector-tab-audio"]');
+      if (!b) return false;
+      b.click();
+      return true;
+    })()`);
+    await new Promise(r => setTimeout(r, 120));
+    const processingClicked = await evaluate(`(() => {
+      const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Audio processing');
+      if (!b) return false;
+      b.click();
+      return true;
+    })()`);
+    await new Promise(r => setTimeout(r, 120));
+    const dspUi = JSON.parse(await evaluate(`JSON.stringify(
+      [...document.querySelectorAll('button')].map(b => b.textContent.trim())
+    )`));
+    const uiOk = tabClicked && processingClicked
+      && ['Audio processing', 'Voice clarity', 'Podcast', 'Music', 'Reset DSP', 'Processing on']
+        .every(label => dspUi.includes(label));
+
+    const ok = offExport.info.streams.some(s => s.codec_type === 'audio')
+      && onExport.info.streams.some(s => s.codec_type === 'audio')
+      && Number.isFinite(offHigh) && Number.isFinite(onHigh)
+      && highDelta > 5 && lowDelta > 2 && midDelta < -2
+      && saved.ok && opened.ok && reopenedDsp?.enabled === true && reopenedDsp?.highGainDb === 12
+      && uiOk;
+    record('TEST 16 audio DSP export', ok, {
+      off: { low: offLow, mid: offMid, high: offHigh },
+      on: { low: onLow, mid: onMid, high: onHigh },
+      deltas: { low: lowDelta, mid: midDelta, high: highDelta },
+      persisted: reopenedDsp,
+      uiOk,
+      tabClicked,
+      processingClicked,
+      dspUi,
+      offExport: summarize(offExport.info),
+      onExport: summarize(onExport.info),
+    });
+  } catch (e) { record('TEST 16 audio DSP export', false, String(e)); }
 
   const state = await evaluate(`JSON.stringify({title:document.title, nodes:document.querySelectorAll('*').length, isTauri:typeof window.__TAURI_INTERNALS__!=='undefined'})`);
   record('App health / no runtime errors', errors.length === 0, { state: JSON.parse(state), errors });

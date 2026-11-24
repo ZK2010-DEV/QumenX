@@ -19,6 +19,21 @@ export type TextAnimationKind =
 
 export interface Point { x: number; y: number; }
 export interface Size { width: number; height: number; }
+
+/** Per-clip audio processing applied in preview and in the real FFmpeg export. */
+export interface AudioDsp {
+  enabled: boolean;
+  highpassHz: number;   // 0 = bypass
+  lowpassHz: number;    // 0 = bypass
+  lowGainDb: number;    // 160 Hz shelf
+  midGainDb: number;    // 1 kHz bell
+  highGainDb: number;   // 8 kHz shelf
+  compressor: boolean;
+  thresholdDb: number;  // -60..0
+  ratio: number;        // 1..20
+  attackMs: number;     // 1..200
+  releaseMs: number;    // 10..2000
+}
 export interface Crop { top: number; right: number; bottom: number; left: number; }
 
 export interface Transform {
@@ -96,6 +111,7 @@ export interface Clip {
   fadeOut?: number;      // seconds
   audioFadeIn?: number;  // seconds
   audioFadeOut?: number; // seconds
+  audioDsp?: AudioDsp;   // local EQ/dynamics processing
   text?: TextStyle;
   caption?: boolean;     // true for imported/manual subtitle clips
   groupId?: string;
@@ -199,6 +215,20 @@ export const DEFAULT_SETTINGS: ProjectSettings = {
 };
 
 export const DEFAULT_CROP: Crop = { top: 0, right: 0, bottom: 0, left: 0 };
+
+export const DEFAULT_AUDIO_DSP: AudioDsp = {
+  enabled: false,
+  highpassHz: 0,
+  lowpassHz: 0,
+  lowGainDb: 0,
+  midGainDb: 0,
+  highGainDb: 0,
+  compressor: false,
+  thresholdDb: -18,
+  ratio: 3,
+  attackMs: 10,
+  releaseMs: 180,
+};
 
 export const DEFAULT_TEXT: TextStyle = {
   text: "Text",
