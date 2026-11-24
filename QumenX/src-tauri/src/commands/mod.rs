@@ -1,6 +1,7 @@
 pub mod media;
 pub mod project;
 pub mod export;
+pub mod subtitles;
 
 pub use media::{
     ffmpeg_capabilities, ffmpeg_probe, ffmpeg_proxy, ffmpeg_thumbnail, ffmpeg_thumbnails,
@@ -11,3 +12,4 @@ pub use project::{
     project_restore_backup, project_save,
 };
 pub use export::{ffmpeg_cancel_export, ffmpeg_export};
+pub use subtitles::{subtitles_read, subtitles_write};

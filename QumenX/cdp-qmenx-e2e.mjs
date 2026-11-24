@@ -752,6 +752,128 @@ async function main() {
       && r.clipMutations === 0 && moved, r);
   } catch (e) { record('TEST 13 timeline render isolation', false, String(e)); }
 
+  // TEST 14 — SRT/VTT caption import, export, persistence and real render -----
+  try {
+    const srtIn = path.join(tmp, 'captions-input.srt');
+    const srtOut = path.join(tmp, 'captions-output.srt');
+    const vttOut = path.join(tmp, 'captions-output.vtt');
+    const captionProjectPath = path.join(tmp, 'caption-project.json');
+    const srtContent = [
+      '1',
+      '00:00:00,000 --> 00:00:01,000',
+      'Hello from',
+      'QumenX',
+      '',
+      '2',
+      '00:00:01,500 --> 00:00:02,500',
+      '<c>Styled caption</c>',
+      '',
+    ].join('\n');
+    const written = await invoke('subtitles_write', { path: srtIn, contents: srtContent });
+    if (!written.ok) throw new Error(written.error);
+
+    const cuesJson = await evaluate(`(async()=>{
+      const s = window.__QUMENX_STORES__;
+      if (!s?.subtitles) return JSON.stringify({ error: 'subtitle helpers missing' });
+      const raw = await s.subtitles.readSubtitleFile(${JSON.stringify(srtIn)});
+      return JSON.stringify(s.subtitles.parseSubtitles(raw));
+    })()`);
+    const cues = JSON.parse(cuesJson);
+    if (cues.error) throw new Error(cues.error);
+
+    const base = project({
+      assets: [asset('v1', 'video', video, 2.5)],
+      tracks: [vtrack],
+      clips: [clip({ id: 'caption-video', trackId: 'tv', assetId: 'v1', start: 0, duration: 2.5 })],
+    });
+    const importedJson = await evaluate(`(() => {
+      const s = window.__QUMENX_STORES__;
+      s.project.getState().setProject(${JSON.stringify(base)});
+      s.media.getState().setAssets(${JSON.stringify(base.assets)});
+      const count = s.project.getState().importSubtitles(${JSON.stringify(cues)});
+      const p = s.project.getState().project;
+      return JSON.stringify({
+        count,
+        tracks: p.tracks.map(t => ({ id: t.id, name: t.name, type: t.type })),
+        captions: p.clips.filter(c => c.caption).map(c => ({
+          start: c.start, duration: c.duration, text: c.text?.text,
+          fontSize: c.text?.fontSize, y: c.transform?.position?.y,
+        })),
+      });
+    })()`);
+    const imported = JSON.parse(importedJson);
+
+    const exportedJson = await evaluate(`(async () => {
+      const s = window.__QUMENX_STORES__;
+      const caps = s.project.getState().exportSubtitles();
+      const srt = s.subtitles.serializeSrt(caps);
+      const vtt = s.subtitles.serializeVtt(caps);
+      await s.subtitles.writeSubtitleFile(${JSON.stringify(srtOut)}, srt);
+      await s.subtitles.writeSubtitleFile(${JSON.stringify(vttOut)}, vtt);
+      const id = s.project.getState().addCaptionAtPlayhead('Manual caption', 2, 0.5);
+      const added = s.project.getState().project.clips.find(c => c.id === id);
+      return JSON.stringify({
+        caps, srt, vtt,
+        added: added ? { caption: added.caption, start: added.start, duration: added.duration, text: added.text?.text } : null,
+      });
+    })()`);
+    const exported = JSON.parse(exportedJson);
+    const finalProjectJson = await evaluate(`JSON.stringify(window.__QUMENX_STORES__.project.getState().project)`);
+    const srtRead = await invoke('subtitles_read', { path: srtOut });
+    const vttRead = await invoke('subtitles_read', { path: vttOut });
+
+    const save = await invoke('project_save', { project_json: finalProjectJson, file_path: captionProjectPath });
+    const opened = await invoke('project_open', { file_path: captionProjectPath });
+    const reopened = opened.ok ? JSON.parse(opened.value) : {};
+    const reopenedCaptions = (reopened.clips || []).filter(c => c.caption);
+
+    await evaluate(`(() => {
+      const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Text');
+      if (b) b.click();
+    })()`);
+    await new Promise(r => setTimeout(r, 100));
+    const uiButtons = JSON.parse(await evaluate(`JSON.stringify(
+      [...document.querySelectorAll('button')].map(b => b.textContent.trim())
+    )`));
+
+    const finalForExport = JSON.parse(await evaluate(`JSON.stringify(window.__QUMENX_STORES__.project.getState().project)`));
+    const { info } = await exportProject(finalForExport, 'test14-captions');
+    const duration = Number(info.format.duration);
+
+    const ok = written.ok && cues.length === 2
+      && cues[0].text === 'Hello from\nQumenX' && cues[1].text === 'Styled caption'
+      && imported.count === 2
+      && imported.tracks.some(t => t.name === 'Captions' && t.type === 'text')
+      && imported.captions.length === 2
+      && imported.captions[0].start === 0 && imported.captions[0].duration === 1
+      && imported.captions[1].start === 1.5 && imported.captions[1].duration === 1
+      && imported.captions[0].text === 'Hello from\nQumenX'
+      && imported.captions[0].fontSize === 24 && imported.captions[0].y === 163
+      && exported.caps.length === 2
+      && exported.srt.includes('00:00:00,000 --> 00:00:01,000')
+      && exported.srt.includes('Hello from\nQumenX')
+      && exported.vtt.startsWith('WEBVTT')
+      && exported.vtt.includes('00:00:01.500 --> 00:00:02.500')
+      && srtRead.ok && srtRead.value === exported.srt
+      && vttRead.ok && vttRead.value === exported.vtt
+      && save.ok && opened.ok && reopenedCaptions.length === 3
+      && reopenedCaptions.some(c => c.text?.text === 'Hello from\nQumenX' && c.caption === true)
+      && exported.added?.caption === true && exported.added.start === 2
+      && exported.added.duration === 0.5 && exported.added.text === 'Manual caption'
+      && ['Import', 'Export SRT', 'Export VTT', 'Add'].every(label => uiButtons.includes(label))
+      && duration > 2.4 && info.streams.some(s => s.codec_type === 'video');
+    record('TEST 14 SRT/VTT captions', ok, {
+      cues,
+      imported,
+      exportedCues: exported.caps,
+      srtBytes: srtRead.ok ? srtRead.value.length : 0,
+      vttBytes: vttRead.ok ? vttRead.value.length : 0,
+      reopenedCaptions: reopenedCaptions.length,
+      added: exported.added,
+      export: summarize(info),
+    });
+  } catch (e) { record('TEST 14 SRT/VTT captions', false, String(e)); }
+
   const state = await evaluate(`JSON.stringify({title:document.title, nodes:document.querySelectorAll('*').length, isTauri:typeof window.__TAURI_INTERNALS__!=='undefined'})`);
   record('App health / no runtime errors', errors.length === 0, { state: JSON.parse(state), errors });
   fs.writeFileSync(path.join(tmp, 'results.json'), JSON.stringify({ results, errors }, null, 2));

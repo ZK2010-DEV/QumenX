@@ -5,7 +5,8 @@ mod commands;
 use commands::{
     ffmpeg_capabilities, ffmpeg_cancel_export, ffmpeg_export, ffmpeg_probe, ffmpeg_proxy,
     ffmpeg_thumbnail, ffmpeg_thumbnails, ffmpeg_waveform, open_path, project_add_recent, project_list_backups,
-    project_open, project_recent, project_restore_backup, project_save,
+    project_open, project_recent, project_restore_backup, project_save, subtitles_read,
+    subtitles_write,
 };
 
 fn main() {
@@ -30,6 +31,8 @@ fn main() {
             project_recent,
             project_add_recent,
             open_path,
+            subtitles_read,
+            subtitles_write,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

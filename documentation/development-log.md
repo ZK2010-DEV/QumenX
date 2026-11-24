@@ -35,3 +35,12 @@ This log records completed development milestones for QumenX. Entries are added 
 - **Scope:** Replaced the timeline's whole-store subscription with a shallow selector that excludes per-frame playhead time, moved the playhead into an isolated component, and collapsed waveform rendering to a single SVG path per audio clip with 96 buckets instead of 160+ rectangles.
 - **Verification:** `npm run build`, `npm run lint` (warnings only), and the full native E2E suite (15/15). TEST 13 advances the playhead 24 frames and verifies zero mutations inside the audio clip DOM while the playhead visually moves.
 - **Notes:** No editing behavior, project schema, IPC command, or FFmpeg export behavior changed.
+
+## Milestone 4 — SRT/VTT caption import and export
+
+- **Commit:** `PENDING`
+- **Message:** `Add real SRT and VTT caption import/export`
+- **Date:** 2026-11-24
+- **Scope:** Added a local SRT/WebVTT parser and serializer, native `subtitles_read`/`subtitles_write` commands, store actions for importing cues as styled bottom-anchored caption clips, adding a caption at the playhead, and exporting caption clips back to SRT/VTT, plus Caption tools in the Text workspace. Captions are real project data (`Clip.caption`) and render through the existing preview and FFmpeg `drawtext` pipelines.
+- **Verification:** `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (3/3), and the full native E2E suite (16/16). TEST 14 covers SRT parsing with multi-line text and inline tags, frame-snapped timing, caption style/timings, SRT/VTT file round-trips, manual caption insertion, project save/reopen preservation, UI controls, and a real FFmpeg export probed with `ffprobe`.
+- **Notes:** Adds two native IPC commands and one optional `Clip.caption` field; project version remains `2`. No source media is modified, and no paid or cloud service is used.

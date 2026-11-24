@@ -26,10 +26,10 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 ### Native desktop app
 
 - The real Tauri window opens with the title **QumenX — Professional Video Editor**, 1300×850, with active `window.__TAURI_INTERNALS__` native IPC.
-- Final E2E health check: title `QumenX — Professional Video Editor`, 422 DOM nodes, `isTauri: true`, **zero console errors, zero runtime exceptions**.
+- Final E2E health check: title `QumenX — Professional Video Editor`, 714 DOM nodes, `isTauri: true`, **zero console errors, zero runtime exceptions**.
 - The dev URL is pinned to `http://127.0.0.1:5173` and Vite starts with `--host 127.0.0.1`. This fixes an environment-specific `localhost` IPv6 timeout that previously produced a blank CDP target. The CDP harness now waits for a genuinely loaded Tauri page and the dev-only store hook before running tests.
 
-### Full E2E suite: 15/15 passed
+### Full E2E suite: 16/16 passed
 
 `run-qmenx-e2e.ps1` launches Vite plus the real debug `qumenx.exe`, drives the app over WebView2 CDP, and invokes real native commands. Every export is written to disk and probed with `ffprobe`.
 
@@ -41,14 +41,15 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 | TEST 4 — styled/animating text over image, export | `2.00 s`, `h264 852x480`, `aac`, 39,256 bytes |
 | TEST 5 — keyframed scale/position/opacity + saturation, export | `2.00 s`, `h264 852x480`, `aac`, 34,752 bytes |
 | TEST 6 — save, rotating backup, deliberate corruption, recovery, restore | 12 backups; recovered `Backup Test` from `%APPDATA%\QumenX\backups\...bak`; restored name/contents correctly |
-| TEST 6b — full 4-track/4-clip project close and reopen | `signatureMatch: true`, expected/actual signature length `1648`; 4 tracks and 4 clips restored |
+| TEST 6b — full 4-track/4-clip project close and reopen | `signatureMatch: true`, expected/actual signature length `1627`; 4 tracks and 4 clips restored |
 | TEST 7 — two additions, two undos, two redos via real UI buttons | clip counts `4 → 5 → 6 → 5 → 4 → 5 → 6`; history diag past `4`, future `0` |
 | TEST 8 — mid-clip freeze hold/export | `1.80 s`, `h264 852x480`, `aac`, 44,601 bytes; hold SSIM `0.99974`, post-hold motion SSIM `0.91048` |
 | TEST 9 — static scale preview/export parity | content centroid `yFull=41`, `yHalf=16`; both exports `852x480` |
 | TEST 10 — proxy generation and preview use | proxy created, source unchanged, proxy stream `video:h264:960x540`, preview used `%LOCALAPPDATA%\QumenX\proxies\f601b477609b7a26.mp4` |
 | TEST 11 — no-op undo, modal shortcut isolation, replay at end | `before=0`, `afterClick=0`, `afterDrag=1`, `playingInModal=false`, `playingOutside=true`, replay `time=0`, `playing=true` |
 | TEST 12 — ripple delete/trim, insert, overwrite, close gaps, markers | ripple moved `c3: 2→1`; insert `1.0s` pushed `c3: 2.2s`; overwrite replaced the inserted clip; ripple trim set `c1: 0.6s` and shifted followers; close gaps compacted `c3: 3→1.8`; marker/color label persisted; export `3.00 s`, `h264 852x480`, `aac` |
-| TEST 13 — timeline render isolation | waveform rendered as `1` SVG path and `0` rectangles; 24 playhead updates produced `0` clip DOM mutations while playhead moved `23.99px → 80px` |
+| TEST 13 — timeline render isolation | waveform rendered as `1` SVG path and `0` rectangles; 24 playhead updates produced `0` clip DOM mutations while playhead moved `20px → 80px` |
+| TEST 14 — SRT/VTT captions | 2 cues parsed with multi-line text and inline tags stripped; imported as frame-snapped clips at `0–1s`/`1.5–2.5s` with `fontSize=24`, bottom offset `163px`; SRT/VTT files round-tripped byte-for-byte; manual caption at `2.0s/0.5s`; 3 captions survived save/reopen; export `2.50 s`, `h264 852x480`, `aac` |
 | App health / no runtime errors | passed; `errors: []` |
 
 Machine-readable results: `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\results.json`.
@@ -73,6 +74,7 @@ Final table also saved to `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\ffprobe-
 | `test8-freeze.mp4` | 1.800000 | h264:852x480 | aac | 44,601 |
 | `test9-scale-full.mp4` | 1.533333 | h264:852x480 | aac | 5,706 |
 | `test9-scale-half.mp4` | 1.533333 | h264:852x480 | aac | 5,830 |
+| `test14-captions.mp4` | 2.500000 | h264:852x480 | aac | 57,181 |
 
 ### Release installers and smoke test
 
@@ -113,7 +115,7 @@ Final table also saved to `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\ffprobe-
 
 ## Stability pass (post-v1.0.0)
 
-Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (15/15).
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (16/16).
 
 - Backup rotation now uses millisecond stamps with collision avoidance, so two quick saves cannot overwrite the same `.bak`; `project_list_backups` still reads legacy second-stamped backups.
 - Import failures outside the per-file probe can no longer leave the Import dialog stuck: `importing` is always cleared in `finally`.
@@ -127,7 +129,7 @@ Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd ch
 
 ## Timeline editing pass (post-Milestone 1)
 
-Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (15/15).
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (16/16).
 
 - Ripple delete closes gaps only on the affected unlocked tracks; unrelated audio tracks stay in sync instead of being shifted unexpectedly.
 - Ripple trim moves upstream clips for start-edge trims and downstream clips for end-edge trims, preserving keyframe timing, source offsets, effect state and freeze ranges wherever they remain valid.
@@ -138,12 +140,22 @@ Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd ch
 
 ## Timeline performance pass (post-Milestone 2)
 
-Verified with `npm run build`, `npm run lint` (warnings only), and the full native E2E suite (15/15).
+Verified with `npm run build`, `npm run lint` (warnings only), and the full native E2E suite (16/16).
 
 - The timeline chrome uses a shallow Zustand selector that intentionally omits `playheadTime`; per-frame playback ticks no longer re-render every track header, clip block and keyframe diamond.
 - The playhead is an isolated subscriber to `playheadTime`/`zoom`, so only its `left` style changes during playback.
 - Waveform peaks are requested with 96 buckets and drawn with one `<path>` element per audio clip instead of one `<rect>` per bucket.
 - TEST 13 uses a `MutationObserver` to confirm the clip DOM is untouched across 24 playhead updates while the playhead itself moves.
+
+## Caption pass (post-Milestone 3)
+
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (3/3), and the full native E2E suite (16/16).
+
+- The Text workspace now offers SRT/VTT import, SRT/VTT export, and a one-click caption at the playhead. All file access is local through the new `subtitles_read`/`subtitles_write` native commands.
+- The parser accepts SRT and WebVTT timing formats, cue identifiers, VTT headers/cue settings, inline styling tags, HTML entities, and multi-line cue text. Serializers emit numbered SRT or standard `WEBVTT` output with stable `HH:MM:SS,mmm`/`HH:MM:SS.mmm` timestamps.
+- Imported cues become real bottom-anchored text clips on a Captions track with resolution-aware font size, outline, shadow, and semi-transparent background. Their timings are snapped to the project frame rate, and `Clip.caption` makes them round-trip through project save/open.
+- Caption text uses the existing `whiteSpace: pre-wrap` preview renderer and the existing FFmpeg `drawtext` `\\n` escape, so multi-line captions render consistently in preview and exported MP4s.
+- TEST 14 exercises the full path from an SRT file on disk to a real FFmpeg export, including byte-for-byte SRT/VTT export round-trips, manual caption insertion and save/reopen preservation.
 
 ## Known limitations / notes
 
@@ -165,7 +177,7 @@ cmd /c cargo-gnu.cmd build                      # Rust debug build; run from src
 cmd /c dev-tauri.cmd                            # launch desktop app in dev mode
 cmd /c build-tauri.cmd                          # build MSI + NSIS installers
 powershell -NoProfile -ExecutionPolicy Bypass -File run-qmenx-e2e.ps1
-                                                # full 15-check native IPC + real export E2E
+                                                # full 16-check native IPC + real export E2E
 powershell -NoProfile -ExecutionPolicy Bypass -File run-release-progress.ps1
                                                 # release-binary export/progress smoke test
 ```

@@ -6,6 +6,9 @@ import { useTimelineStore } from "@/stores/timelineStore";
 import { usePreviewStore } from "@/stores/previewStore";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import {
+  parseSubtitles, serializeSrt, serializeVtt, readSubtitleFile, writeSubtitleFile,
+} from "@/lib/subtitles";
 import "./index.css";
 
 // Dev-only inspection hook used by the CDP end-to-end suite. Stripped from
@@ -17,6 +20,13 @@ if (import.meta.env.DEV) {
     preview: usePreviewStore,
     media: useMediaStore,
     workspace: useWorkspaceStore,
+    subtitles: {
+      parseSubtitles,
+      serializeSrt,
+      serializeVtt,
+      readSubtitleFile,
+      writeSubtitleFile,
+    },
   };
 }
 

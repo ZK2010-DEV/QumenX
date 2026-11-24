@@ -1,9 +1,10 @@
 import * as React from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   Film, Music, Type, Smile, Zap, Link2, SlidersHorizontal, Layout,
   Box, Plus, Search, Grid2X2, List, Upload, Folder, Clock, Maximize2,
-  Sparkles, Gauge, Circle, Square, Triangle, ArrowRight, Info,
+  Sparkles, Gauge, Circle, Square, Triangle, ArrowRight, Info, Download, FileText,
 } from "lucide-react";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useProjectStore } from "@/stores/projectStore";
@@ -17,6 +18,9 @@ import {
 import { cn } from "@/lib/utils";
 import { ffmpeg } from "@/lib/ffmpeg";
 import { importMediaPaths } from "@/lib/mediaImport";
+import {
+  parseSubtitles, readSubtitleFile, serializeSrt, serializeVtt, writeSubtitleFile,
+} from "@/lib/subtitles";
 import { Button } from "@/components/ui/button";
 import { Input, Badge } from "@/components/ui/input";
 import { Select } from "@/components/ui/tabs";
@@ -390,6 +394,122 @@ function useScrollTop<T extends HTMLElement>(): [React.RefObject<T | null>, numb
   return [ref, top];
 }
 
+/* ------------------------------ caption tools ------------------------------- */
+
+function CaptionTools() {
+  const currentTime = usePreviewStore((s) => s.currentTime);
+  const importSubtitles = useProjectStore((s) => s.importSubtitles);
+  const exportSubtitles = useProjectStore((s) => s.exportSubtitles);
+  const addCaptionAtPlayhead = useProjectStore((s) => s.addCaptionAtPlayhead);
+  const setSelectedClip = useTimelineStore((s) => s.setSelectedClip);
+  const [captionText, setCaptionText] = React.useState("");
+  const [status, setStatus] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const handleImport = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      const picked = await openFileDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Subtitles", extensions: ["srt", "vtt"] }],
+      });
+      if (typeof picked !== "string") return;
+      const cues = parseSubtitles(await readSubtitleFile(picked));
+      if (cues.length === 0) {
+        setStatus("No captions found in that file.");
+        return;
+      }
+      const count = importSubtitles(cues);
+      setStatus(count === cues.length
+        ? `Imported ${count} caption${count === 1 ? "" : "s"}.`
+        : "Caption track is locked; nothing was imported.");
+    } catch (error) {
+      setStatus(`Import failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleExport = async (format: "srt" | "vtt") => {
+    setBusy(true);
+    setStatus("");
+    try {
+      const cues = exportSubtitles();
+      if (cues.length === 0) {
+        setStatus("No captions to export. Import an SRT/VTT file or add a caption first.");
+        return;
+      }
+      const picked = await saveFileDialog({
+        defaultPath: `captions.${format}`,
+        filters: [{ name: format === "srt" ? "SubRip subtitle" : "WebVTT subtitle", extensions: [format] }],
+      });
+      if (typeof picked !== "string") return;
+      await writeSubtitleFile(
+        picked,
+        format === "srt" ? serializeSrt(cues) : serializeVtt(cues),
+      );
+      setStatus(`Exported ${cues.length} caption${cues.length === 1 ? "" : "s"} to ${format.toUpperCase()}.`);
+    } catch (error) {
+      setStatus(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAdd = () => {
+    const text = captionText.trim();
+    if (!text) return;
+    const id = addCaptionAtPlayhead(text, currentTime, 3);
+    if (!id) {
+      setStatus("Caption track is locked; nothing was added.");
+      return;
+    }
+    setSelectedClip(id);
+    setCaptionText("");
+    setStatus("Caption added at the playhead.");
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border p-2.5"
+      style={{ borderColor: "var(--qx-border)", background: "var(--qx-panel-raised)" }}>
+      <div className="flex items-center gap-2">
+        <FileText className="h-3.5 w-3.5 text-editor-accent" />
+        <span className="text-[11px] font-semibold text-editor-text">Captions · SRT / VTT</span>
+      </div>
+      <p className="text-[10px] leading-relaxed text-editor-textMuted">
+        Imported captions become styled clips on a Captions track. Exports use their real timeline timings.
+      </p>
+      <div className="grid grid-cols-2 gap-1.5">
+        <Button size="sm" variant="outline" className="text-[10px]" disabled={busy} onClick={handleImport}>
+          <Upload className="mr-1 h-3 w-3" /> Import
+        </Button>
+        <Button size="sm" variant="outline" className="text-[10px]" disabled={busy} onClick={() => handleExport("srt")}>
+          <Download className="mr-1 h-3 w-3" /> Export SRT
+        </Button>
+      </div>
+      <Button size="sm" variant="ghost" className="w-full text-[10px]" disabled={busy} onClick={() => handleExport("vtt")}>
+        Export VTT
+      </Button>
+      <div className="flex gap-1.5 pt-0.5">
+        <Input
+          value={captionText}
+          onChange={(e) => setCaptionText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
+          placeholder="Caption at playhead"
+          className="h-7 flex-1 text-[10px]"
+          aria-label="Caption text"
+        />
+        <Button size="sm" className="h-7 px-2 text-[10px]" disabled={busy || !captionText.trim()} onClick={handleAdd}>
+          Add
+        </Button>
+      </div>
+      {status ? <p className="text-[10px] leading-snug text-editor-textMuted">{status}</p> : null}
+    </div>
+  );
+}
+
 /* --------------------------- text / sticker panels -------------------------- */
 
 function TextWorkspace({ section }: { section: NavSection }) {
@@ -412,6 +532,7 @@ function TextWorkspace({ section }: { section: NavSection }) {
           Added at the playhead ({currentTime.toFixed(2)}s). Select the clip to restyle it in the Inspector.
         </p>
       </div>
+      {section === "text" ? <CaptionTools /> : null}
       <div className={cn("grid gap-2", section === "stickers" || section === "elements" ? "grid-cols-4" : "grid-cols-2")}>
         {section === "text" ? TEXT_PRESETS.map((preset) => (
           <Button key={preset.label} variant="outline" className="justify-start text-[11px]" onClick={() => addTitle(preset.style)}>

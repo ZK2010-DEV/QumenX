@@ -3,8 +3,11 @@ import {
   type Project, type Clip, type Track, type Asset, type ProjectSettings,
   type Keyframe, type KeyframeProperty, type TextStyle, type EffectKind,
   type TransitionKind, type Crop, type Marker, DEFAULT_SETTINGS, DEFAULT_CROP,
-  DEFAULT_TEXT, newClip, newTrack, snapTimeToFrame,
+  DEFAULT_TEXT, DEFAULT_TRANSFORM, newClip, newTrack, snapTimeToFrame,
 } from "@/types/project";
+import {
+  type CaptionCue, canvasHeight, captionOffsetY, captionTextStyle,
+} from "@/lib/subtitles";
 
 const EMPTY_PROJECT: Project = {
   id: crypto.randomUUID(),
@@ -101,6 +104,12 @@ interface ProjectState {
   /** Compact clips to the left, removing empty gaps on one or all unlocked tracks. */
   closeGaps: (trackId?: string) => void;
   addTextClip: (start: number, duration: number, text?: Partial<TextStyle>, trackId?: string) => string;
+  /** Import SRT/VTT cues as styled caption clips; returns the number added. */
+  importSubtitles: (cues: CaptionCue[], trackId?: string) => number;
+  /** Add one caption clip at a timeline position; returns its id. */
+  addCaptionAtPlayhead: (text: string, start: number, duration?: number, trackId?: string) => string;
+  /** Read caption clips back out as timing-only cues for SRT/VTT export. */
+  exportSubtitles: (trackId?: string) => CaptionCue[];
   updateText: (clipId: string, patch: Partial<TextStyle>) => void;
   addKeyframe: (clipId: string, property: KeyframeProperty, time: number, value: number) => void;
   updateKeyframe: (clipId: string, keyframeId: string, patch: Partial<Keyframe>) => void;
@@ -245,6 +254,56 @@ function resolveMediaTrack(
     order: project.tracks.length,
   });
   return { track: created, tracks: [...project.tracks, created] };
+}
+
+/** Reuse an unlocked caption/text track, or create a dedicated one. */
+function resolveCaptionTrack(
+  project: Project, preferredTrackId?: string
+): { track: Track; tracks: Track[] } | null {
+  const preferred = preferredTrackId
+    ? project.tracks.find((t) => t.id === preferredTrackId)
+    : undefined;
+  if (preferred) return preferred.locked ? null : { track: preferred, tracks: project.tracks };
+
+  const captionTrack = project.tracks.find((t) =>
+    t.type === "text" && project.clips.some((c) => c.caption && c.trackId === t.id)
+  ) ?? project.tracks.find((t) => t.type === "text" && /caption/i.test(t.name));
+  if (captionTrack) return captionTrack.locked ? null : { track: captionTrack, tracks: project.tracks };
+
+  const freeText = project.tracks.find((t) => t.type === "text" && !t.locked);
+  if (freeText) return { track: freeText, tracks: project.tracks };
+
+  const created = newTrack({
+    name: "Captions",
+    type: "text",
+    height: 56,
+    order: project.tracks.length,
+  });
+  return { track: created, tracks: [...project.tracks, created] };
+}
+
+function buildCaptionClip(
+  project: Project, trackId: string, text: string, start: number, duration: number, zIndex: number
+): Clip {
+  const height = canvasHeight(project.settings);
+  return newClip({
+    trackId,
+    assetId: "",
+    name: text.replace(/\s+/g, " ").trim().slice(0, 24) || "Caption",
+    start,
+    duration,
+    zIndex,
+    caption: true,
+    text: {
+      ...DEFAULT_TEXT,
+      ...captionTextStyle(height),
+      text,
+    },
+    transform: {
+      ...DEFAULT_TRANSFORM,
+      position: { x: 0, y: captionOffsetY(height) },
+    },
+  });
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -663,6 +722,61 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
       return commit(state, { ...state.project, clips: shifted, updatedAt: Date.now() }, "Close timeline gaps");
     }),
+
+  importSubtitles: (cues, trackId) => {
+    const state = get();
+    const valid = cues.filter((c) => c && Number.isFinite(c.start) && Number.isFinite(c.end) && c.end > c.start && c.text?.trim());
+    if (valid.length === 0) return 0;
+    const target = resolveCaptionTrack(state.project, trackId);
+    if (!target) return 0;
+    const fps = state.project.settings.fps || 30;
+    const created = valid.map((cue, index) => {
+      const start = snapTimeToFrame(Math.max(0, cue.start), fps);
+      const end = snapTimeToFrame(Math.max(start + 1 / fps, cue.end), fps);
+      return buildCaptionClip(
+        state.project,
+        target.track.id,
+        cue.text,
+        start,
+        Math.max(1 / fps, end - start),
+        100 + state.project.clips.length + index,
+      );
+    });
+    set((s) => commit(s, {
+      ...s.project,
+      tracks: target.tracks,
+      clips: [...s.project.clips, ...created],
+      updatedAt: Date.now(),
+    }, `Import ${created.length} caption${created.length === 1 ? "" : "s"}`));
+    return created.length;
+  },
+
+  addCaptionAtPlayhead: (text, start, duration, trackId) => {
+    const state = get();
+    const cleaned = text.trim();
+    if (!cleaned) return "";
+    const target = resolveCaptionTrack(state.project, trackId);
+    if (!target) return "";
+    const fps = state.project.settings.fps || 30;
+    const at = snapTimeToFrame(Math.max(0, start), fps);
+    const length = Math.max(1 / fps, snapTimeToFrame(duration ?? 3, fps));
+    const caption = buildCaptionClip(
+      state.project, target.track.id, cleaned, at, length, 100 + state.project.clips.length
+    );
+    set((s) => commit(s, {
+      ...s.project,
+      tracks: target.tracks,
+      clips: [...s.project.clips, caption],
+      updatedAt: Date.now(),
+    }, "Add caption"));
+    return caption.id;
+  },
+
+  exportSubtitles: (trackId) => get().project.clips
+    .filter((c) => c.caption && c.text && (!trackId || c.trackId === trackId))
+    .slice()
+    .sort((a, b) => a.start - b.start)
+    .map((c) => ({ start: c.start, end: c.start + c.duration, text: c.text!.text })),
 
   addTextClip: (start, duration, patch, trackId) => {
     const state = get();

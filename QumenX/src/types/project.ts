@@ -97,6 +97,7 @@ export interface Clip {
   audioFadeIn?: number;  // seconds
   audioFadeOut?: number; // seconds
   text?: TextStyle;
+  caption?: boolean;     // true for imported/manual subtitle clips
   groupId?: string;
   blendMode?: "normal" | "screen" | "multiply" | "overlay";
   detachOf?: string;     // audio clip detached from this video clip id
