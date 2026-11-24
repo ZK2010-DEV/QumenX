@@ -38,7 +38,7 @@ This log records completed development milestones for QumenX. Entries are added 
 
 ## Milestone 4 — SRT/VTT caption import and export
 
-- **Commit:** `PENDING`
+- **Commit:** `f423b7f5f572dced3b16d815767ce181b2b459e1`
 - **Message:** `Add real SRT and VTT caption import/export`
 - **Date:** 2026-11-24
 - **Scope:** Added a local SRT/WebVTT parser and serializer, native `subtitles_read`/`subtitles_write` commands, store actions for importing cues as styled bottom-anchored caption clips, adding a caption at the playhead, and exporting caption clips back to SRT/VTT, plus Caption tools in the Text workspace. Captions are real project data (`Clip.caption`) and render through the existing preview and FFmpeg `drawtext` pipelines.
