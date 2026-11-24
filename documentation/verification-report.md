@@ -29,7 +29,7 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 - Final E2E health check: title `QumenX — Professional Video Editor`, 804 DOM nodes, `isTauri: true`, **zero console errors, zero runtime exceptions**.
 - The dev URL is pinned to `http://127.0.0.1:5173` and Vite starts with `--host 127.0.0.1`. This fixes an environment-specific `localhost` IPv6 timeout that previously produced a blank CDP target. The CDP harness now waits for a genuinely loaded Tauri page and the dev-only store hook before running tests.
 
-### Full E2E suite: 18/18 passed
+### Full E2E suite: 19/19 passed
 
 `run-qmenx-e2e.ps1` launches Vite plus the real debug `qumenx.exe`, drives the app over WebView2 CDP, and invokes real native commands. Every export is written to disk and probed with `ffprobe`.
 
@@ -52,6 +52,7 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 | TEST 14 — SRT/VTT captions | 2 cues parsed with multi-line text and inline tags stripped; imported as frame-snapped clips at `0–1s`/`1.5–2.5s` with `fontSize=24`, bottom offset `163px`; SRT/VTT files round-tripped byte-for-byte; manual caption at `2.0s/0.5s`; 3 captions survived save/reopen; export `2.50 s`, `h264 852x480`, `aac` |
 | TEST 15 — project templates | built-in apply produced a 3-track, 2-title, 2-marker 1080p project; custom template saved/listed/applied/deleted through native IPC; Templates UI exposed Apply and Save current; export `4.00 s`, `h264 1920x1080`, `aac` |
 | TEST 16 — per-clip audio DSP | baseline vs processed 3-tone export: low band `+2.9 dB`, mid band `-6.2 dB`, high band `+5.9 dB`; DSP settings survived save/reopen; Inspector exposed Audio processing, presets and Processing on |
+| TEST 17 — clip masks | normal ellipse mask cuts corner to black (luma 16) while center stays white (luma 235); inverted mask swaps them; mask settings survived save/reopen; Inspector exposed Mask controls, presets and invert |
 | App health / no runtime errors | passed; `errors: []` |
 
 Machine-readable results: `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\results.json`.
@@ -80,6 +81,8 @@ Final table also saved to `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\ffprobe-
 | `test15-templates.mp4` | 4.000000 | h264:1920x1080 | aac | 35,394 |
 | `test16-dsp-off.mp4` | 2.000000 | h264:852x480 | aac | 52,582 |
 | `test16-dsp-on.mp4` | 2.000000 | h264:852x480 | aac | 51,945 |
+| `test17-mask.mp4` | 2.000000 | h264:852x480 | aac | 8,768 |
+| `test17-mask-invert.mp4` | 2.000000 | h264:852x480 | aac | 8,781 |
 
 ### Release installers and smoke test
 
@@ -182,6 +185,15 @@ Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd ch
 - DSP settings are ordinary project data and survive save/reopen. The project schema remains version `2`, and all existing clips without DSP behave exactly as before.
 - TEST 16 generates a 160 Hz / 1 kHz / 8 kHz tone fixture, exports a baseline and a processed MP4, then measures the actual AAC output with narrow band-pass filters and `volumedetect`. The measured deltas match the requested shelves/bell: low `+2.9 dB`, mid `-6.2 dB`, high `+5.9 dB`. The same test verifies save/reopen persistence and the Inspector preset controls.
 
+## Clip masks pass (post-Milestone 6)
+
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (8/8), and the full native E2E suite (19/19).
+
+- Every clip now has optional `Clip.mask` data: rectangle or ellipse shape, center, width, height, rotation, feather and invert. Preview renders masks with CSS SVG mask images; the Inspector exposes kind presets (Circle, Portrait, Letterbox, Rounded), center/size/rotation/feather sliders, an invert toggle and reset.
+- Export applies an FFmpeg `geq` alpha expression that evaluates the rotated mask per pixel and multiplies it with the clip alpha, so the exported video matches the CSS preview exactly. Padding stays transparent.
+- Mask settings are ordinary project data and survive save/reopen. The project schema remains version `2`, and all existing clips without a mask behave exactly as before.
+- TEST 17 exports normal and inverted masks over a white clip and measures luminance: normal ellipse mask cuts the corner to black (luma 16) while the center stays white (luma 235); inverted swaps them; mask settings survive save/reopen; Inspector controls apply kind, size and invert.
+
 ## Known limitations / notes
 
 - `ffmpeg` and `ffprobe` must be installed and on PATH at runtime (winget `Gyan.FFmpeg.Essentials` 9.0.2 was used here). The app is otherwise fully offline.
@@ -202,7 +214,7 @@ cmd /c cargo-gnu.cmd build                      # Rust debug build; run from src
 cmd /c dev-tauri.cmd                            # launch desktop app in dev mode
 cmd /c build-tauri.cmd                          # build MSI + NSIS installers
 powershell -NoProfile -ExecutionPolicy Bypass -File run-qmenx-e2e.ps1
-                                                # full 18-check native IPC + real export E2E
+                                                # full 19-check native IPC + real export E2E
 powershell -NoProfile -ExecutionPolicy Bypass -File run-release-progress.ps1
                                                 # release-binary export/progress smoke test
 ```
