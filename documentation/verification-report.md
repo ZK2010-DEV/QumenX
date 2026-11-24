@@ -16,8 +16,8 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 
 - `npm run build` passes TypeScript (`tsc -b`) and Vite production build. Final `QumenX/dist` output:
   - `index.html` — 0.69 kB (0.41 kB gzip)
-  - CSS — 26.20 kB (5.80 kB gzip)
-  - JS — 386.70 kB (114.10 kB gzip)
+  - CSS — 36.31 kB (7.77 kB gzip)
+  - JS — 458.54 kB (135.25 kB gzip)
 - `npm run lint` has **no errors**; only non-blocking warnings remain in legacy QA scripts and a few unused imports/legacy UI primitives.
 - `cmd /c cargo-gnu.cmd build` passes as `qumenx v1.0.0` in both debug and release profiles.
 - Toolchain: `stable-x86_64-pc-windows-gnu` with WinLibs MinGW and `CARGO_TARGET_DIR=C:\Users\Gamer\capcut-target` (the space-free target path is required by MinGW `windres`).
@@ -26,10 +26,10 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 ### Native desktop app
 
 - The real Tauri window opens with the title **QumenX — Professional Video Editor**, 1300×850, with active `window.__TAURI_INTERNALS__` native IPC.
-- Final E2E health check: title `QumenX — Professional Video Editor`, 752 DOM nodes, `isTauri: true`, **zero console errors, zero runtime exceptions**.
+- Final E2E health check: title `QumenX — Professional Video Editor`, 804 DOM nodes, `isTauri: true`, **zero console errors, zero runtime exceptions**.
 - The dev URL is pinned to `http://127.0.0.1:5173` and Vite starts with `--host 127.0.0.1`. This fixes an environment-specific `localhost` IPv6 timeout that previously produced a blank CDP target. The CDP harness now waits for a genuinely loaded Tauri page and the dev-only store hook before running tests.
 
-### Full E2E suite: 17/17 passed
+### Full E2E suite: 18/18 passed
 
 `run-qmenx-e2e.ps1` launches Vite plus the real debug `qumenx.exe`, drives the app over WebView2 CDP, and invokes real native commands. Every export is written to disk and probed with `ffprobe`.
 
@@ -51,6 +51,7 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 | TEST 13 — timeline render isolation | waveform rendered as `1` SVG path and `0` rectangles; 24 playhead updates produced `0` clip DOM mutations while playhead moved `20px → 80px` |
 | TEST 14 — SRT/VTT captions | 2 cues parsed with multi-line text and inline tags stripped; imported as frame-snapped clips at `0–1s`/`1.5–2.5s` with `fontSize=24`, bottom offset `163px`; SRT/VTT files round-tripped byte-for-byte; manual caption at `2.0s/0.5s`; 3 captions survived save/reopen; export `2.50 s`, `h264 852x480`, `aac` |
 | TEST 15 — project templates | built-in apply produced a 3-track, 2-title, 2-marker 1080p project; custom template saved/listed/applied/deleted through native IPC; Templates UI exposed Apply and Save current; export `4.00 s`, `h264 1920x1080`, `aac` |
+| TEST 16 — per-clip audio DSP | baseline vs processed 3-tone export: low band `+2.9 dB`, mid band `-6.2 dB`, high band `+5.9 dB`; DSP settings survived save/reopen; Inspector exposed Audio processing, presets and Processing on |
 | App health / no runtime errors | passed; `errors: []` |
 
 Machine-readable results: `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\results.json`.
@@ -77,6 +78,8 @@ Final table also saved to `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\ffprobe-
 | `test9-scale-half.mp4` | 1.533333 | h264:852x480 | aac | 5,830 |
 | `test14-captions.mp4` | 2.500000 | h264:852x480 | aac | 57,181 |
 | `test15-templates.mp4` | 4.000000 | h264:1920x1080 | aac | 35,394 |
+| `test16-dsp-off.mp4` | 2.000000 | h264:852x480 | aac | 52,582 |
+| `test16-dsp-on.mp4` | 2.000000 | h264:852x480 | aac | 51,945 |
 
 ### Release installers and smoke test
 
@@ -117,7 +120,7 @@ Final table also saved to `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\ffprobe-
 
 ## Stability pass (post-v1.0.0)
 
-Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (17/17).
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (13/13).
 
 - Backup rotation now uses millisecond stamps with collision avoidance, so two quick saves cannot overwrite the same `.bak`; `project_list_backups` still reads legacy second-stamped backups.
 - Import failures outside the per-file probe can no longer leave the Import dialog stuck: `importing` is always cleared in `finally`.
@@ -131,7 +134,7 @@ Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd ch
 
 ## Timeline editing pass (post-Milestone 1)
 
-Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (17/17).
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (14/14).
 
 - Ripple delete closes gaps only on the affected unlocked tracks; unrelated audio tracks stay in sync instead of being shifted unexpectedly.
 - Ripple trim moves upstream clips for start-edge trims and downstream clips for end-edge trims, preserving keyframe timing, source offsets, effect state and freeze ranges wherever they remain valid.
@@ -142,7 +145,7 @@ Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd ch
 
 ## Timeline performance pass (post-Milestone 2)
 
-Verified with `npm run build`, `npm run lint` (warnings only), and the full native E2E suite (17/17).
+Verified with `npm run build`, `npm run lint` (warnings only), and the full native E2E suite (15/15).
 
 - The timeline chrome uses a shallow Zustand selector that intentionally omits `playheadTime`; per-frame playback ticks no longer re-render every track header, clip block and keyframe diamond.
 - The playhead is an isolated subscriber to `playheadTime`/`zoom`, so only its `left` style changes during playback.
@@ -151,7 +154,7 @@ Verified with `npm run build`, `npm run lint` (warnings only), and the full nati
 
 ## Caption pass (post-Milestone 3)
 
-Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (3/3), and the full native E2E suite (17/17).
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (3/3), and the full native E2E suite (16/16).
 
 - The Text workspace now offers SRT/VTT import, SRT/VTT export, and a one-click caption at the playhead. All file access is local through the new `subtitles_read`/`subtitles_write` native commands.
 - The parser accepts SRT and WebVTT timing formats, cue identifiers, VTT headers/cue settings, inline styling tags, HTML entities, and multi-line cue text. Serializers emit numbered SRT or standard `WEBVTT` output with stable `HH:MM:SS,mmm`/`HH:MM:SS.mmm` timestamps.
@@ -168,6 +171,16 @@ Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd ch
 - The Rust `template_save` command uses `rename_all = "snake_case"`, matching `project_save`/`ffmpeg_export`, so the frontend `template_json` argument is accepted by Tauri v2 while all public IPC command names remain unchanged.
 - The project schema is unchanged (version `2`), and templates use the existing preview and FFmpeg text/export pipelines.
 - TEST 15 covers built-in application, custom template save/list/apply/delete, Templates UI controls and a real FFmpeg export of the applied template, probed with `ffprobe`.
+
+## Audio DSP pass (post-Milestone 5)
+
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (6/6), and the full native E2E suite (18/18).
+
+- Every clip now has optional local DSP: high-pass, low-pass, 160 Hz low shelf, 1 kHz mid bell, 8 kHz high shelf, and a compressor with threshold, ratio, attack and release. The Inspector Audio tab exposes the controls and Voice clarity, Podcast and Music presets.
+- Preview processing uses a real Web Audio graph (`MediaElementAudioSourceNode` → filters → compressor → gain) so EQ and dynamics are audible before export. Once the graph owns a media element, clip volume, mute, fades and volume keyframes are applied through its output gain node.
+- The FFmpeg export chain applies the same intent with `highpass`, `lowpass`, `lowshelf`, `equalizer`, `highshelf` and `acompressor` after speed changes and before volume/fades, so exported audio is genuinely processed rather than merely relabeled.
+- DSP settings are ordinary project data and survive save/reopen. The project schema remains version `2`, and all existing clips without DSP behave exactly as before.
+- TEST 16 generates a 160 Hz / 1 kHz / 8 kHz tone fixture, exports a baseline and a processed MP4, then measures the actual AAC output with narrow band-pass filters and `volumedetect`. The measured deltas match the requested shelves/bell: low `+2.9 dB`, mid `-6.2 dB`, high `+5.9 dB`. The same test verifies save/reopen persistence and the Inspector preset controls.
 
 ## Known limitations / notes
 
@@ -189,7 +202,7 @@ cmd /c cargo-gnu.cmd build                      # Rust debug build; run from src
 cmd /c dev-tauri.cmd                            # launch desktop app in dev mode
 cmd /c build-tauri.cmd                          # build MSI + NSIS installers
 powershell -NoProfile -ExecutionPolicy Bypass -File run-qmenx-e2e.ps1
-                                                # full 17-check native IPC + real export E2E
+                                                # full 18-check native IPC + real export E2E
 powershell -NoProfile -ExecutionPolicy Bypass -File run-release-progress.ps1
                                                 # release-binary export/progress smoke test
 ```

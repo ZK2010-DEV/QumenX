@@ -53,3 +53,12 @@ This log records completed development milestones for QumenX. Entries are added 
 - **Scope:** Added four built-in project templates (widescreen intro, vertical shorts, podcast interview, clean slideshow) with tracks, markers and text clips, plus native `template_list`/`template_save`/`template_delete` commands that keep custom templates as JSON in the QumenX app-data directory. The Templates workspace now applies built-ins or saved templates, saves the current project under a name, and deletes custom templates. Applying a template replaces the current project through undo history and clears its saved path so it cannot overwrite the original project file.
 - **Verification:** `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (4/4), and the full native E2E suite (17/17). TEST 15 verifies built-in apply, custom save/list/apply/delete, UI controls, and a real FFmpeg export probed with `ffprobe`.
 - **Notes:** Adds three native IPC commands but no project-schema change; project version remains `2`. Templates are stored locally, require no account or cloud service, and never modify source media.
+
+## Milestone 6 — per-clip audio DSP
+
+- **Commit:** `bc6fca651953f3b5d6a5eed99be934cfbdc487a5`
+- **Message:** `Add per-clip audio DSP with EQ and compression`
+- **Date:** 2026-11-24
+- **Scope:** Added optional `Clip.audioDsp` data with high-pass, low-pass, low/mid/high EQ and compressor settings; a Web Audio preview chain that keeps clip volume, fades and keyframes in the graph; Inspector Audio processing controls with Voice clarity, Podcast and Music presets; and a real FFmpeg export chain using `highpass`, `lowpass`, `lowshelf`, `equalizer`, `highshelf` and `acompressor` after speed processing and before clip volume/fades. DSP settings round-trip through project save/open.
+- **Verification:** `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (6/6), and the full native E2E suite (18/18). TEST 16 exports baseline and processed versions of a generated 3-tone fixture and measures the actual AAC output: low band `+2.9 dB`, mid band `-6.2 dB`, high band `+5.9 dB`; it also verifies persistence and Inspector preset controls.
+- **Notes:** Additive optional field; project version remains `2`. Processing is local, uses only FFmpeg and Web Audio, and requires no account, upload, cloud service or paid API. Existing volume, mute, fades, keyframes and export behavior remain unchanged when DSP is off.
