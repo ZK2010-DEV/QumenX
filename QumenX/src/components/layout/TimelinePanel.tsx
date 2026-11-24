@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   Volume2, VolumeX, Eye, EyeOff, Lock, Unlock, Trash2, ChevronUp, ChevronDown,
   Plus, Minus, Magnet, AudioLines, Type, Film, Diamond, Scissors, Copy, Grid3X3,
@@ -42,7 +43,35 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
   void onAddAsset;
   const project = useProjectStore((s) => s.project);
   const { tracks, clips } = project;
-  const tl = useTimelineStore();
+  // Subscribe only to fields the timeline chrome uses. Playhead time changes
+  // every animation frame, so it is intentionally excluded and rendered by an
+  // isolated component below.
+  const tl = useTimelineStore(useShallow((s) => ({
+    zoom: s.zoom,
+    scrollLeft: s.scrollLeft,
+    snapToGrid: s.snapToGrid,
+    snapToClip: s.snapToClip,
+    snapToPlayhead: s.snapToPlayhead,
+    snapToFrames: s.snapToFrames,
+    showWaveforms: s.showWaveforms,
+    showKeyframes: s.showKeyframes,
+    keyframeFilter: s.keyframeFilter,
+    selectedClipId: s.selectedClipId,
+    selectedClipIds: s.selectedClipIds,
+    setZoom: s.setZoom,
+    setScrollLeft: s.setScrollLeft,
+    setPlayheadTime: s.setPlayheadTime,
+    setSelectedClip: s.setSelectedClip,
+    setSelectedClips: s.setSelectedClips,
+    setKeyframeFilter: s.setKeyframeFilter,
+    toggleSnapToGrid: s.toggleSnapToGrid,
+    toggleSnapToClip: s.toggleSnapToClip,
+    toggleSnapToPlayhead: s.toggleSnapToPlayhead,
+    toggleSnapToFrames: s.toggleSnapToFrames,
+    toggleWaveforms: s.toggleWaveforms,
+    toggleKeyframes: s.toggleKeyframes,
+    snapTime: s.snapTime,
+  })));
   const setCurrentTime = usePreviewStore((s) => s.setCurrentTime);
   const assets = useMediaStore((s) => s.assets);
   const assetsById = React.useMemo(() => {
@@ -99,7 +128,6 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
 
   const maxEnd = clips.reduce((m, c) => Math.max(m, c.start + c.duration), 30);
   const containerWidth = Math.max(1000, maxEnd * tl.zoom + 400);
-  const playheadX = tl.playheadTime * tl.zoom;
 
   React.useEffect(() => {
     if (scrollRef.current && scrollRef.current.scrollLeft !== tl.scrollLeft) {
@@ -470,13 +498,8 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
                 </div>
               ) : null}
 
-              {/* Playhead */}
-              <div
-                className="pointer-events-none absolute top-0 z-30 w-0.5"
-                style={{ left: playheadX, height: totalTracksHeight, background: "var(--qx-playhead)", boxShadow: "0 0 8px var(--qx-playhead)" }}
-              >
-                <div className="absolute -left-1.5 -top-1 h-3 w-3 rotate-45" style={{ background: "var(--qx-playhead)" }} />
-              </div>
+              {/* Playhead is isolated so per-frame clock updates do not re-render all clips. */}
+              <Playhead height={totalTracksHeight} />
             </div>
           </div>
         </div>
@@ -541,6 +564,20 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
           </div>
         </>
       ) : null}
+    </div>
+  );
+}
+
+function Playhead({ height }: { height: number }) {
+  const time = useTimelineStore((s) => s.playheadTime);
+  const zoom = useTimelineStore((s) => s.zoom);
+  return (
+    <div
+      data-testid="timeline-playhead"
+      className="pointer-events-none absolute top-0 z-30 w-0.5"
+      style={{ left: time * zoom, height, background: "var(--qx-playhead)", boxShadow: "0 0 8px var(--qx-playhead)" }}
+    >
+      <div className="absolute -left-1.5 -top-1 h-3 w-3 rotate-45" style={{ background: "var(--qx-playhead)" }} />
     </div>
   );
 }
@@ -692,7 +729,7 @@ function ClipBlock({
   React.useEffect(() => {
     if (!showWaveforms || !asset || asset.type !== "audio" || waveform) return;
     let cancelled = false;
-    ffmpeg.waveform(asset.path, 160).then((peaks) => {
+    ffmpeg.waveform(asset.path, 96).then((peaks) => {
       if (!cancelled && peaks.length > 0) {
         waveformCache.set(asset.id, peaks);
         setWaveform(peaks);
@@ -701,6 +738,14 @@ function ClipBlock({
     }).catch(() => { /* waveform is best-effort */ });
     return () => { cancelled = true; };
   }, [asset, showWaveforms, waveform]);
+
+  // One SVG path instead of one <rect> per bucket keeps long audio tracks cheap.
+  const waveformPath = React.useMemo(() => {
+    if (!waveform || waveform.length === 0) return "";
+    return waveform
+      .map((v, i) => `M${i} ${(50 - v * 48).toFixed(1)}V${(50 + v * 48).toFixed(1)}`)
+      .join(" ");
+  }, [waveform]);
 
   const startDrag = (e: React.MouseEvent, mode: "move" | "left" | "right") => {
     if (e.button !== 0) return;
@@ -818,11 +863,9 @@ function ClipBlock({
       onContextMenu={onContextMenu}
       title={`${clip.name} — ${formatDuration(clip.duration)}`}
     >
-      {waveform && waveform.length > 0 ? (
-        <svg className="absolute inset-0 h-full w-full opacity-40" preserveAspectRatio="none" viewBox={`0 0 ${waveform.length} 100`}>
-          {waveform.map((v, i) => (
-            <rect key={i} x={i} y={50 - v * 48} width={0.8} height={Math.max(1, v * 96)} fill="#d1fae5" />
-          ))}
+      {waveformPath ? (
+        <svg className="absolute inset-0 h-full w-full opacity-40" preserveAspectRatio="none" viewBox={`0 0 ${waveform!.length} 100`}>
+          <path d={waveformPath} stroke="#d1fae5" strokeWidth="0.8" fill="none" />
         </svg>
       ) : null}
       <div className="pointer-events-none relative flex h-full items-start justify-between px-1.5 pt-0.5">

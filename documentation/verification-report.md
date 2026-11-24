@@ -29,7 +29,7 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 - Final E2E health check: title `QumenX — Professional Video Editor`, 422 DOM nodes, `isTauri: true`, **zero console errors, zero runtime exceptions**.
 - The dev URL is pinned to `http://127.0.0.1:5173` and Vite starts with `--host 127.0.0.1`. This fixes an environment-specific `localhost` IPv6 timeout that previously produced a blank CDP target. The CDP harness now waits for a genuinely loaded Tauri page and the dev-only store hook before running tests.
 
-### Full E2E suite: 14/14 passed
+### Full E2E suite: 15/15 passed
 
 `run-qmenx-e2e.ps1` launches Vite plus the real debug `qumenx.exe`, drives the app over WebView2 CDP, and invokes real native commands. Every export is written to disk and probed with `ffprobe`.
 
@@ -48,6 +48,7 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 | TEST 10 — proxy generation and preview use | proxy created, source unchanged, proxy stream `video:h264:960x540`, preview used `%LOCALAPPDATA%\QumenX\proxies\f601b477609b7a26.mp4` |
 | TEST 11 — no-op undo, modal shortcut isolation, replay at end | `before=0`, `afterClick=0`, `afterDrag=1`, `playingInModal=false`, `playingOutside=true`, replay `time=0`, `playing=true` |
 | TEST 12 — ripple delete/trim, insert, overwrite, close gaps, markers | ripple moved `c3: 2→1`; insert `1.0s` pushed `c3: 2.2s`; overwrite replaced the inserted clip; ripple trim set `c1: 0.6s` and shifted followers; close gaps compacted `c3: 3→1.8`; marker/color label persisted; export `3.00 s`, `h264 852x480`, `aac` |
+| TEST 13 — timeline render isolation | waveform rendered as `1` SVG path and `0` rectangles; 24 playhead updates produced `0` clip DOM mutations while playhead moved `23.99px → 80px` |
 | App health / no runtime errors | passed; `errors: []` |
 
 Machine-readable results: `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\results.json`.
@@ -112,7 +113,7 @@ Final table also saved to `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\ffprobe-
 
 ## Stability pass (post-v1.0.0)
 
-Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (14/14).
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (15/15).
 
 - Backup rotation now uses millisecond stamps with collision avoidance, so two quick saves cannot overwrite the same `.bak`; `project_list_backups` still reads legacy second-stamped backups.
 - Import failures outside the per-file probe can no longer leave the Import dialog stuck: `importing` is always cleared in `finally`.
@@ -126,7 +127,7 @@ Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd ch
 
 ## Timeline editing pass (post-Milestone 1)
 
-Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (14/14).
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (15/15).
 
 - Ripple delete closes gaps only on the affected unlocked tracks; unrelated audio tracks stay in sync instead of being shifted unexpectedly.
 - Ripple trim moves upstream clips for start-edge trims and downstream clips for end-edge trims, preserving keyframe timing, source offsets, effect state and freeze ranges wherever they remain valid.
@@ -134,6 +135,15 @@ Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd ch
 - Timeline markers are real v2 project data: add with `M`/toolbar, seek by click, rename by double-click, delete by right-click.
 - Clip color labels, zoom presets, fit-to-project, `Shift+Del` ripple delete, and media-library Insert/Overwrite controls are wired to actual store operations.
 - No IPC command names, E2E selectors, FFmpeg filters or export semantics changed in this pass.
+
+## Timeline performance pass (post-Milestone 2)
+
+Verified with `npm run build`, `npm run lint` (warnings only), and the full native E2E suite (15/15).
+
+- The timeline chrome uses a shallow Zustand selector that intentionally omits `playheadTime`; per-frame playback ticks no longer re-render every track header, clip block and keyframe diamond.
+- The playhead is an isolated subscriber to `playheadTime`/`zoom`, so only its `left` style changes during playback.
+- Waveform peaks are requested with 96 buckets and drawn with one `<path>` element per audio clip instead of one `<rect>` per bucket.
+- TEST 13 uses a `MutationObserver` to confirm the clip DOM is untouched across 24 playhead updates while the playhead itself moves.
 
 ## Known limitations / notes
 
@@ -155,7 +165,7 @@ cmd /c cargo-gnu.cmd build                      # Rust debug build; run from src
 cmd /c dev-tauri.cmd                            # launch desktop app in dev mode
 cmd /c build-tauri.cmd                          # build MSI + NSIS installers
 powershell -NoProfile -ExecutionPolicy Bypass -File run-qmenx-e2e.ps1
-                                                # full 14-check native IPC + real export E2E
+                                                # full 15-check native IPC + real export E2E
 powershell -NoProfile -ExecutionPolicy Bypass -File run-release-progress.ps1
                                                 # release-binary export/progress smoke test
 ```

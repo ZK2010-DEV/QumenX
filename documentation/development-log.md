@@ -26,3 +26,12 @@ This log records completed development milestones for QumenX. Entries are added 
 - **Scope:** Added real ripple delete, frame-accurate ripple trim, insert and overwrite at the playhead, close gaps, timeline markers with seek/rename/delete, clip color labels, timeline zoom presets and fit-to-project, plus media-library Insert/Overwrite actions and keyboard shortcuts. Operations preserve clip keyframes, effects, source offsets, speed, freeze state and undo history, and respect locked tracks.
 - **Verification:** `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (14/14). TEST 12 verifies ripple deletion, insertion, overwrite replacement, ripple trimming, gap compaction, markers, color labels, and a real FFmpeg export of the edited timeline.
 - **Notes:** Additive only: project version stays `2`, all existing E2E selectors/IPC command names/export behavior are unchanged, and no FFmpeg graph changes were needed.
+
+## Milestone 3 — timeline rendering performance
+
+- **Commit:** `PENDING`
+- **Message:** `Reduce timeline render work during playback`
+- **Date:** 2026-11-24
+- **Scope:** Replaced the timeline's whole-store subscription with a shallow selector that excludes per-frame playhead time, moved the playhead into an isolated component, and collapsed waveform rendering to a single SVG path per audio clip with 96 buckets instead of 160+ rectangles.
+- **Verification:** `npm run build`, `npm run lint` (warnings only), and the full native E2E suite (15/15). TEST 13 advances the playhead 24 frames and verifies zero mutations inside the audio clip DOM while the playhead visually moves.
+- **Notes:** No editing behavior, project schema, IPC command, or FFmpeg export behavior changed.

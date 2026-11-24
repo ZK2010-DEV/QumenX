@@ -712,6 +712,46 @@ async function main() {
     });
   } catch (e) { record('TEST 12 ripple/insert/overwrite/markers', false, String(e)); }
 
+  // TEST 13 — timeline DOM stays static while the playhead moves -------------
+  try {
+    const peaks = Array.from({ length: 96 }, (_, i) => 0.25 + 0.6 * Math.abs(Math.sin(i / 7)));
+    const perf = project({
+      assets: [asset('wave-audio', 'audio', audio, 3, { waveform: peaks })],
+      tracks: [atrack],
+      clips: [clip({ id: 'wave-perf', trackId: 'ta', assetId: 'wave-audio', name: 'wave-perf', duration: 3 })],
+    });
+    const perfJson = await evaluate(`(async () => {
+      const stores = window.__QUMENX_STORES__;
+      if (!stores) return JSON.stringify({ error: 'dev store hook missing' });
+      stores.preview.getState().setPlaying(false);
+      stores.project.getState().setProject(${JSON.stringify(perf)});
+      stores.media.getState().setAssets(${JSON.stringify(perf.assets)});
+      const tl = stores.timeline.getState();
+      if (!tl.showWaveforms) tl.toggleWaveforms();
+      await new Promise(r => setTimeout(r, 150));
+      const clipEl = document.querySelector('[title^="wave-perf"]');
+      if (!clipEl) return JSON.stringify({ error: 'waveform clip missing' });
+      const paths = clipEl.querySelectorAll('svg path').length;
+      const rects = clipEl.querySelectorAll('svg rect').length;
+      let clipMutations = 0;
+      const observer = new MutationObserver(records => { clipMutations += records.length; });
+      observer.observe(clipEl, { attributes: true, childList: true, characterData: true, subtree: true });
+      const beforeLeft = document.querySelector('[data-testid="timeline-playhead"]')?.style.left || '';
+      for (let i = 1; i <= 24; i++) {
+        stores.timeline.getState().setPlayheadTime(i / 30);
+        await new Promise(r => requestAnimationFrame(r));
+      }
+      observer.disconnect();
+      await new Promise(r => setTimeout(r, 50));
+      const afterLeft = document.querySelector('[data-testid="timeline-playhead"]')?.style.left || '';
+      return JSON.stringify({ paths, rects, clipMutations, beforeLeft, afterLeft });
+    })()`);
+    const r = JSON.parse(perfJson);
+    const moved = Number.parseFloat(r.afterLeft) > Number.parseFloat(r.beforeLeft);
+    record('TEST 13 timeline render isolation', !r.error && r.paths === 1 && r.rects === 0
+      && r.clipMutations === 0 && moved, r);
+  } catch (e) { record('TEST 13 timeline render isolation', false, String(e)); }
+
   const state = await evaluate(`JSON.stringify({title:document.title, nodes:document.querySelectorAll('*').length, isTauri:typeof window.__TAURI_INTERNALS__!=='undefined'})`);
   record('App health / no runtime errors', errors.length === 0, { state: JSON.parse(state), errors });
   fs.writeFileSync(path.join(tmp, 'results.json'), JSON.stringify({ results, errors }, null, 2));
