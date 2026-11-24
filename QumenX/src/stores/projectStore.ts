@@ -2,8 +2,8 @@ import { create } from "zustand";
 import {
   type Project, type Clip, type Track, type Asset, type ProjectSettings,
   type Keyframe, type KeyframeProperty, type TextStyle, type EffectKind,
-  type TransitionKind, type Crop, DEFAULT_SETTINGS, DEFAULT_CROP, DEFAULT_TEXT,
-  newClip, newTrack, snapTimeToFrame,
+  type TransitionKind, type Crop, type Marker, DEFAULT_SETTINGS, DEFAULT_CROP,
+  DEFAULT_TEXT, newClip, newTrack, snapTimeToFrame,
 } from "@/types/project";
 
 const EMPTY_PROJECT: Project = {
@@ -90,6 +90,16 @@ interface ProjectState {
   moveClip: (clipId: string, newStart: number, newTrackId: string) => void;
   splitClip: (clipId: string, atTime: number) => void;
   duplicateClip: (clipId: string) => void;
+  /** Delete clips and close the resulting gaps on their tracks. */
+  rippleDelete: (clipIds: string[]) => void;
+  /** Ripple-trim one clip edge; downstream (right) or upstream (left) clips follow. */
+  rippleTrim: (clipId: string, edge: "left" | "right", time: number) => void;
+  /** Insert media at a timeline position, splitting and pushing later clips. */
+  insertAssetAtPlayhead: (assetId: string, time: number, trackId?: string) => string | null;
+  /** Overwrite a timeline range with media, replacing any overlapped segments. */
+  overwriteAssetAtPlayhead: (assetId: string, time: number, trackId?: string) => string | null;
+  /** Compact clips to the left, removing empty gaps on one or all unlocked tracks. */
+  closeGaps: (trackId?: string) => void;
   addTextClip: (start: number, duration: number, text?: Partial<TextStyle>, trackId?: string) => string;
   updateText: (clipId: string, patch: Partial<TextStyle>) => void;
   addKeyframe: (clipId: string, property: KeyframeProperty, time: number, value: number) => void;
@@ -103,6 +113,10 @@ interface ProjectState {
   detachAudio: (clipId: string) => string | null;
   groupClips: (clipIds: string[], groupId?: string) => void;
   ungroupClips: (clipIds: string[]) => void;
+  setClipColor: (clipId: string, colorTag?: string) => void;
+  addMarker: (time: number, label?: string, color?: string) => string | null;
+  updateMarker: (markerId: string, patch: Partial<Marker>) => void;
+  removeMarker: (markerId: string) => void;
   updateSettings: (settings: Partial<ProjectSettings>) => void;
   setName: (name: string) => void;
   undo: () => void;
@@ -134,6 +148,103 @@ function withClip(project: Project, clipId: string, fn: (c: Clip) => Clip): Proj
   // Inspector edits and keyboard shortcuts.
   if (isClipLocked(project, clipId)) return project;
   return { ...project, clips: project.clips.map((c) => (c.id === clipId ? fn(c) : c)), updatedAt: Date.now() };
+}
+
+const TIME_EPS = 1e-6;
+
+/** Build a clip segment while preserving its local animation/effect state. */
+function segmentClip(
+  clip: Clip, startLocal: number, endLocal: number, newStart: number, fps: number, id = clip.id
+): Clip | null {
+  const from = snapTimeToFrame(Math.max(0, startLocal), fps);
+  const to = snapTimeToFrame(Math.min(clip.duration, endLocal), fps);
+  if (to <= from + TIME_EPS) return null;
+  const speedAbs = Math.max(0.01, Math.abs(clip.speed || 1));
+  const isCopy = id !== clip.id;
+  const freeze = clip.freeze?.enabled
+    && clip.freeze.at >= from - TIME_EPS
+    && clip.freeze.at + clip.freeze.duration <= to + TIME_EPS
+    ? { ...clip.freeze, at: Math.max(0, clip.freeze.at - from) }
+    : undefined;
+  return {
+    ...clip,
+    id,
+    start: snapTimeToFrame(Math.max(0, newStart), fps),
+    duration: to - from,
+    sourceOffset: Math.max(0, clip.sourceOffset + from * speedAbs),
+    keyframes: clip.keyframes
+      .filter((k) => k.time >= from - TIME_EPS && k.time < to - TIME_EPS)
+      .map((k) => ({
+        ...k,
+        id: isCopy ? crypto.randomUUID() : k.id,
+        time: Math.max(0, k.time - from),
+      }))
+      .sort((a, b) => a.time - b.time),
+    effects: clip.effects.map((e) => isCopy ? { ...e, id: `${id}-${e.kind}` } : e),
+    freeze,
+  };
+}
+
+/** Retiming for a left-edge trim, including source frames before the current in-point. */
+function trimClipStart(clip: Clip, newStart: number): Clip {
+  const delta = newStart - clip.start;
+  const speedAbs = Math.max(0.01, Math.abs(clip.speed || 1));
+  const duration = clip.duration - delta;
+  const freeze = clip.freeze?.enabled
+    && clip.freeze.at >= delta - TIME_EPS
+    && clip.freeze.at + clip.freeze.duration <= duration + TIME_EPS
+    ? { ...clip.freeze, at: Math.max(0, clip.freeze.at - delta) }
+    : undefined;
+  return {
+    ...clip,
+    start: newStart,
+    duration,
+    sourceOffset: Math.max(0, clip.sourceOffset + delta * speedAbs),
+    keyframes: clip.keyframes
+      .filter((k) => k.time >= delta - TIME_EPS)
+      .map((k) => ({ ...k, time: Math.max(0, k.time - delta) }))
+      .sort((a, b) => a.time - b.time),
+    freeze,
+  };
+}
+
+function mediaClipDuration(asset: Asset, fps: number): number {
+  const raw = Number.isFinite(asset.duration) && asset.duration > 0 ? asset.duration : 3;
+  return Math.max(1 / fps, snapTimeToFrame(raw, fps));
+}
+
+/** Pick a usable target track, creating a sensible one when none exists. */
+function resolveMediaTrack(
+  project: Project, asset: Asset, preferredTrackId?: string
+): { track: Track; tracks: Track[] } | null {
+  const allowed = asset.type === "audio"
+    ? ["audio"]
+    : asset.type === "image"
+      ? ["image", "overlay", "video"]
+      : ["video", "overlay"];
+  const preferred = preferredTrackId
+    ? project.tracks.find((t) => t.id === preferredTrackId)
+    : undefined;
+  if (preferred && !preferred.locked && allowed.includes(preferred.type)) {
+    return { track: preferred, tracks: project.tracks };
+  }
+  const fallback = [...project.tracks]
+    .sort((a, b) => a.order - b.order)
+    .find((t) => !t.locked && allowed.includes(t.type));
+  if (fallback) return { track: fallback, tracks: project.tracks };
+
+  const type: Track["type"] = asset.type === "audio" ? "audio" : asset.type === "image" ? "image" : "video";
+  const labels: Record<Track["type"], string> = {
+    video: "Video", audio: "Audio", text: "Text", overlay: "Overlay", image: "Image",
+  };
+  const count = project.tracks.filter((t) => t.type === type).length + 1;
+  const created = newTrack({
+    name: `${labels[type]} ${count}`,
+    type,
+    height: type === "audio" ? 48 : 64,
+    order: project.tracks.length,
+  });
+  return { track: created, tracks: [...project.tracks, created] };
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -343,6 +454,216 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }, "Duplicate clip");
     }),
 
+  rippleDelete: (clipIds) =>
+    set((state) => {
+      const ids = new Set(clipIds);
+      const deletions = state.project.clips.filter((c) => ids.has(c.id) && !isClipLocked(state.project, c.id));
+      if (deletions.length === 0) return state;
+      const byTrack = new Map<string, Clip[]>();
+      deletions.forEach((c) => {
+        const list = byTrack.get(c.trackId) ?? [];
+        list.push(c);
+        byTrack.set(c.trackId, list);
+      });
+      const fps = state.project.settings.fps || 30;
+      const remaining = state.project.clips.filter((c) => !ids.has(c.id));
+      const shifted = remaining.map((c) => {
+        const removed = byTrack.get(c.trackId);
+        if (!removed || isClipLocked(state.project, c.id)) return c;
+        const amount = removed
+          .filter((d) => d.start + d.duration <= c.start + TIME_EPS)
+          .reduce((sum, d) => sum + d.duration, 0);
+        if (amount <= TIME_EPS) return c;
+        return { ...c, start: snapTimeToFrame(Math.max(0, c.start - amount), fps) };
+      });
+      if (shifted.every((c, i) => c === remaining[i])) return state;
+      return commit(state, {
+        ...state.project,
+        clips: shifted,
+        updatedAt: Date.now(),
+      }, `Ripple delete ${deletions.length} clip${deletions.length === 1 ? "" : "s"}`);
+    }),
+
+  rippleTrim: (clipId, edge, time) =>
+    set((state) => {
+      const clip = state.project.clips.find((c) => c.id === clipId);
+      if (!clip || isClipLocked(state.project, clipId)) return state;
+      const fps = state.project.settings.fps || 30;
+      const speedAbs = Math.max(0.01, Math.abs(clip.speed || 1));
+      const at = snapTimeToFrame(Math.max(0, time), fps);
+      let updated: Clip;
+      let delta: number;
+
+      if (edge === "left") {
+        const earliest = Math.max(0, clip.start - clip.sourceOffset / speedAbs);
+        const latest = clip.start + clip.duration - 1 / fps;
+        const newStart = Math.max(earliest, Math.min(at, latest));
+        delta = newStart - clip.start;
+        if (Math.abs(delta) <= TIME_EPS) return state;
+        updated = trimClipStart(clip, newStart);
+      } else {
+        const asset = state.project.assets.find((a) => a.id === clip.assetId);
+        const sourceLimit = asset && asset.duration > 0
+          ? Math.max(1 / fps, (asset.duration - clip.sourceOffset) / speedAbs)
+          : clip.duration;
+        const wanted = Math.max(1 / fps, at - clip.start);
+        const newDuration = Math.min(wanted, Math.max(clip.duration, sourceLimit));
+        delta = newDuration - clip.duration;
+        if (Math.abs(delta) <= TIME_EPS) return state;
+        updated = {
+          ...clip,
+          duration: newDuration,
+          keyframes: clip.keyframes.filter((k) => k.time <= newDuration + TIME_EPS),
+          freeze: clip.freeze?.enabled && clip.freeze.at + clip.freeze.duration <= newDuration + TIME_EPS
+            ? clip.freeze
+            : undefined,
+        };
+      }
+
+      const boundary = edge === "right" ? clip.start + clip.duration : clip.start;
+      const clips = state.project.clips.map((c) => {
+        if (c.id === clipId) return updated;
+        if (c.trackId !== clip.trackId || isClipLocked(state.project, c.id)) return c;
+        const follows = edge === "right"
+          ? c.start >= boundary - TIME_EPS
+          : c.start + c.duration <= boundary + TIME_EPS;
+        if (!follows) return c;
+        return { ...c, start: snapTimeToFrame(Math.max(0, c.start + delta), fps) };
+      });
+      return commit(state, { ...state.project, clips, updatedAt: Date.now() },
+        `Ripple trim ${edge} edge`);
+    }),
+
+  insertAssetAtPlayhead: (assetId, time, trackId) => {
+    const state = get();
+    const asset = state.project.assets.find((a) => a.id === assetId);
+    if (!asset) return null;
+    const target = resolveMediaTrack(state.project, asset, trackId);
+    if (!target) return null;
+    const fps = state.project.settings.fps || 30;
+    const at = snapTimeToFrame(Math.max(0, time), fps);
+    const duration = mediaClipDuration(asset, fps);
+    const inserted = newClip({
+      trackId: target.track.id,
+      assetId: asset.id,
+      name: asset.name || asset.type,
+      start: at,
+      duration,
+      zIndex: state.project.clips.length,
+    });
+
+    const replacements: Clip[] = [];
+    const trackClips = state.project.clips
+      .filter((c) => c.trackId === target.track.id)
+      .sort((a, b) => a.start - b.start);
+    trackClips.forEach((c) => {
+      if (c.start + TIME_EPS >= at) {
+        replacements.push({ ...c, start: snapTimeToFrame(c.start + duration, fps) });
+      } else if (c.start < at && c.start + c.duration > at + TIME_EPS) {
+        const local = at - c.start;
+        const left = segmentClip(c, 0, local, c.start, fps, c.id);
+        const right = segmentClip(c, local, c.duration, at + duration, fps, crypto.randomUUID());
+        if (left) replacements.push(left);
+        if (right) replacements.push(right);
+      } else {
+        replacements.push(c);
+      }
+    });
+
+    set((s) => commit(s, {
+      ...s.project,
+      tracks: target.tracks,
+      clips: [
+        ...s.project.clips.filter((c) => c.trackId !== target.track.id),
+        ...replacements,
+        inserted,
+      ],
+      updatedAt: Date.now(),
+    }, "Insert clip at playhead"));
+    return inserted.id;
+  },
+
+  overwriteAssetAtPlayhead: (assetId, time, trackId) => {
+    const state = get();
+    const asset = state.project.assets.find((a) => a.id === assetId);
+    if (!asset) return null;
+    const target = resolveMediaTrack(state.project, asset, trackId);
+    if (!target) return null;
+    const fps = state.project.settings.fps || 30;
+    const start = snapTimeToFrame(Math.max(0, time), fps);
+    const end = start + mediaClipDuration(asset, fps);
+    const written = newClip({
+      trackId: target.track.id,
+      assetId: asset.id,
+      name: asset.name || asset.type,
+      start,
+      duration: end - start,
+      zIndex: state.project.clips.length,
+    });
+
+    const replacements: Clip[] = [];
+    state.project.clips
+      .filter((c) => c.trackId === target.track.id)
+      .sort((a, b) => a.start - b.start)
+      .forEach((c) => {
+        if (c.start + c.duration <= start + TIME_EPS || c.start >= end - TIME_EPS) {
+          replacements.push(c);
+          return;
+        }
+        const localStart = Math.max(0, start - c.start);
+        const localEnd = Math.min(c.duration, end - c.start);
+        const left = localStart > TIME_EPS
+          ? segmentClip(c, 0, localStart, c.start, fps, c.id)
+          : null;
+        const right = c.duration - localEnd > TIME_EPS
+          ? segmentClip(c, localEnd, c.duration, end, fps, crypto.randomUUID())
+          : null;
+        if (left) replacements.push(left);
+        if (right) replacements.push(right);
+      });
+
+    set((s) => commit(s, {
+      ...s.project,
+      tracks: target.tracks,
+      clips: [
+        ...s.project.clips.filter((c) => c.trackId !== target.track.id),
+        ...replacements,
+        written,
+      ],
+      updatedAt: Date.now(),
+    }, "Overwrite clip at playhead"));
+    return written.id;
+  },
+
+  closeGaps: (trackId) =>
+    set((state) => {
+      const fps = state.project.settings.fps || 30;
+      const targets = trackId
+        ? state.project.tracks.filter((t) => t.id === trackId && !t.locked).map((t) => t.id)
+        : state.project.tracks.filter((t) => !t.locked).map((t) => t.id);
+      if (targets.length === 0) return state;
+      const targetSet = new Set(targets);
+      const cursors = new Map<string, number>();
+      const newStarts = new Map<string, number>();
+      [...state.project.clips]
+        .sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+        .forEach((c) => {
+          if (!targetSet.has(c.trackId) || isClipLocked(state.project, c.id)) return;
+          const nextStart = snapTimeToFrame(cursors.get(c.trackId) ?? 0, fps);
+          cursors.set(c.trackId, nextStart + c.duration);
+          newStarts.set(c.id, nextStart);
+        });
+      if ([...newStarts].every(([id, start]) =>
+        state.project.clips.some((c) => c.id === id && Math.abs(c.start - start) <= TIME_EPS))) return state;
+      const shifted = state.project.clips.map((c) => {
+        const nextStart = newStarts.get(c.id);
+        return nextStart === undefined || Math.abs(nextStart - c.start) <= TIME_EPS
+          ? c
+          : { ...c, start: nextStart };
+      });
+      return commit(state, { ...state.project, clips: shifted, updatedAt: Date.now() }, "Close timeline gaps");
+    }),
+
   addTextClip: (start, duration, patch, trackId) => {
     const state = get();
     let targetTrack = trackId
@@ -494,6 +815,53 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       clips: state.project.clips.map((c) => clipIds.includes(c.id) && !isClipLocked(state.project, c.id) ? { ...c, groupId: undefined } : c),
       updatedAt: Date.now(),
     }, "Ungroup clips")),
+
+  setClipColor: (clipId, colorTag) =>
+    set((state) => commit(state, withClip(state.project, clipId, (c) => ({ ...c, colorTag })), "Clip color label")),
+
+  addMarker: (time, label, color) => {
+    const state = get();
+    const fps = state.project.settings.fps || 30;
+    const marker: Marker = {
+      id: crypto.randomUUID(),
+      time: snapTimeToFrame(Math.max(0, time), fps),
+      label: label?.trim() || `Marker ${state.project.markers.length + 1}`,
+      color: color || "#f59e0b",
+    };
+    set((s) => commit(s, {
+      ...s.project,
+      markers: [...s.project.markers, marker].sort((a, b) => a.time - b.time),
+      updatedAt: Date.now(),
+    }, "Add timeline marker"));
+    return marker.id;
+  },
+
+  updateMarker: (markerId, patch) =>
+    set((state) => {
+      const fps = state.project.settings.fps || 30;
+      let changed = false;
+      const markers = state.project.markers.map((m) => {
+        if (m.id !== markerId) return m;
+        changed = true;
+        return {
+          ...m,
+          ...patch,
+          time: patch.time === undefined ? m.time : snapTimeToFrame(Math.max(0, patch.time), fps),
+        };
+      }).sort((a, b) => a.time - b.time);
+      if (!changed) return state;
+      return commit(state, { ...state.project, markers, updatedAt: Date.now() }, "Edit timeline marker");
+    }),
+
+  removeMarker: (markerId) =>
+    set((state) => {
+      if (!state.project.markers.some((m) => m.id === markerId)) return state;
+      return commit(state, {
+        ...state.project,
+        markers: state.project.markers.filter((m) => m.id !== markerId),
+        updatedAt: Date.now(),
+      }, "Remove timeline marker");
+    }),
 
   updateSettings: (settings) =>
     set((state) => commit(state, {

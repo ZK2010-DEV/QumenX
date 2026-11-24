@@ -2,7 +2,7 @@ import * as React from "react";
 import {
   Volume2, VolumeX, Eye, EyeOff, Lock, Unlock, Trash2, ChevronUp, ChevronDown,
   Plus, Minus, Magnet, AudioLines, Type, Film, Diamond, Scissors, Copy, Grid3X3,
-  Link2, X, PanelBottom,
+  Link2, X, PanelBottom, MapPin, Maximize2, Palette,
 } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useTimelineStore } from "@/stores/timelineStore";
@@ -29,6 +29,14 @@ const KEYFRAME_PROPERTIES: Array<{ value: KeyframeProperty; label: string }> = [
   { value: "cropBottom", label: "Crop B" },
   { value: "cropLeft", label: "Crop L" },
 ];
+const COLOR_LABELS = [
+  { label: "Blue", value: "#3b82f6" },
+  { label: "Green", value: "#10b981" },
+  { label: "Amber", value: "#f59e0b" },
+  { label: "Red", value: "#ef4444" },
+  { label: "Purple", value: "#a855f7" },
+];
+const ZOOM_PRESETS = [25, 50, 100, 200, 400];
 
 export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => void }) {
   void onAddAsset;
@@ -138,7 +146,7 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
   };
 
   const selectedClip = clips.find((c) => c.id === tl.selectedClipId);
-  const performTool = (tool: "split" | "duplicate" | "delete") => {
+  const performTool = (tool: "split" | "duplicate" | "delete" | "rippleDelete") => {
     if (!selectedClip) return;
     const store = useProjectStore.getState();
     if (tool === "split") store.splitClip(selectedClip.id, usePreviewStore.getState().currentTime);
@@ -147,21 +155,55 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
       store.removeClip(selectedClip.id);
       tl.setSelectedClip(null);
     }
+    if (tool === "rippleDelete") {
+      const ids = tl.selectedClipIds.length > 1 ? tl.selectedClipIds : [selectedClip.id];
+      store.rippleDelete(ids);
+      tl.setSelectedClip(null);
+    }
+  };
+
+  const fitToProject = () => {
+    const available = Math.max(240, (scrollRef.current?.clientWidth ?? 800) - 48);
+    tl.setZoom(available / Math.max(1, maxEnd));
+    tl.setScrollLeft(0);
+  };
+
+  const addMarkerAtPlayhead = () => {
+    useProjectStore.getState().addMarker(usePreviewStore.getState().currentTime);
   };
 
   const contextClip = contextMenu ? clips.find((c) => c.id === contextMenu.clipId) ?? null : null;
   const contextTrack = contextClip ? tracks.find((t) => t.id === contextClip.trackId) : null;
   const contextLocked = Boolean(contextTrack?.locked);
+  const playhead = usePreviewStore.getState().currentTime;
+  const fps = project.settings.fps || 30;
+  const canTrimStart = !!contextClip
+    && playhead > contextClip.start + 1 / fps
+    && playhead <= contextClip.start + contextClip.duration;
+  const canTrimEnd = !!contextClip
+    && playhead >= contextClip.start
+    && playhead < contextClip.start + contextClip.duration - 1 / fps;
 
-  const runContextAction = (action: "split" | "duplicate" | "delete" | "group" | "ungroup") => {
+  const runContextAction = (
+    action: "split" | "duplicate" | "delete" | "rippleDelete" | "rippleTrimStart"
+      | "rippleTrimEnd" | "closeGaps" | "group" | "ungroup"
+  ) => {
     if (!contextClip || contextLocked) return;
     const store = useProjectStore.getState();
-    if (action === "split") store.splitClip(contextClip.id, usePreviewStore.getState().currentTime);
+    if (action === "split") store.splitClip(contextClip.id, playhead);
     if (action === "duplicate") store.duplicateClip(contextClip.id);
     if (action === "delete") {
       store.removeClip(contextClip.id);
       tl.setSelectedClip(null);
     }
+    if (action === "rippleDelete") {
+      const ids = tl.selectedClipIds.includes(contextClip.id) ? tl.selectedClipIds : [contextClip.id];
+      store.rippleDelete(ids);
+      tl.setSelectedClip(null);
+    }
+    if (action === "rippleTrimStart") store.rippleTrim(contextClip.id, "left", playhead);
+    if (action === "rippleTrimEnd") store.rippleTrim(contextClip.id, "right", playhead);
+    if (action === "closeGaps") store.closeGaps(contextClip.trackId);
     if (action === "group") { store.groupClips(tl.selectedClipIds); }
     if (action === "ungroup") { store.ungroupClips(tl.selectedClipIds.includes(contextClip.id) ? tl.selectedClipIds : [contextClip.id]); }
     setContextMenu(null);
@@ -208,6 +250,16 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
           </IconButton>
         </div>
 
+        <div className="hidden items-center gap-0.5 lg:flex">
+          {ZOOM_PRESETS.map((z) => (
+            <button key={z} type="button" onClick={() => tl.setZoom(z)}
+              className="rounded px-1.5 py-0.5 text-[9px] tabular-nums text-editor-textMuted hover:bg-editor-surfaceHover hover:text-editor-text"
+              style={{ color: Math.round(tl.zoom) === z ? "var(--qx-accent)" : undefined }}>
+              {z}
+            </button>
+          ))}
+        </div>
+
         <div className="flex items-center gap-0.5">
           <IconButton tooltip="Snap to clips" active={tl.snapToClip} onClick={tl.toggleSnapToClip} className="!h-7 !w-7">
             <Magnet className="h-3.5 w-3.5" />
@@ -226,6 +278,9 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
           </IconButton>
           <IconButton tooltip="Show keyframes" active={tl.showKeyframes} onClick={tl.toggleKeyframes} className="!h-7 !w-7">
             <Diamond className="h-3.5 w-3.5" />
+          </IconButton>
+          <IconButton tooltip="Fit project to timeline" onClick={fitToProject} className="!h-7 !w-7">
+            <Maximize2 className="h-3.5 w-3.5" />
           </IconButton>
         </div>
 
@@ -252,6 +307,15 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
           </IconButton>
           <IconButton tooltip="Delete clip (Del)" onClick={() => performTool("delete")} disabled={!selectedClip} className="!h-7 !w-7 hover:!text-[var(--qx-danger)]">
             <Trash2 className="h-3.5 w-3.5" />
+          </IconButton>
+          <IconButton tooltip="Ripple delete selected (Shift+Del)" onClick={() => performTool("rippleDelete")} disabled={!selectedClip} className="!h-7 !w-7 hover:!text-[var(--qx-danger)]">
+            <span className="text-[10px] font-bold">R</span>
+          </IconButton>
+          <IconButton tooltip="Close gaps on unlocked tracks" onClick={() => useProjectStore.getState().closeGaps()} className="!h-7 !w-7">
+            <span className="text-[13px] leading-none">⇤</span>
+          </IconButton>
+          <IconButton tooltip="Add marker at playhead (M)" onClick={addMarkerAtPlayhead} className="!h-7 !w-7">
+            <MapPin className="h-3.5 w-3.5" />
           </IconButton>
         </div>
 
@@ -328,6 +392,33 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
                     ))}
                   </div>
                 ))}
+                {project.markers.map((marker) => (
+                  <button
+                    key={marker.id}
+                    type="button"
+                    className="absolute bottom-0.5 z-30 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border border-black/60 shadow hover:scale-125"
+                    style={{ left: marker.time * tl.zoom, background: marker.color }}
+                    title={`${marker.label} @ ${marker.time.toFixed(2)}s — click to seek, double-click to rename, right-click to delete`}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      tl.setPlayheadTime(marker.time);
+                      setCurrentTime(marker.time);
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      const next = window.prompt("Marker name", marker.label);
+                      if (next !== null && next.trim()) {
+                        useProjectStore.getState().updateMarker(marker.id, { label: next.trim() });
+                      }
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      useProjectStore.getState().removeMarker(marker.id);
+                    }}
+                  />
+                ))}
               </div>
             </div>
 
@@ -394,10 +485,10 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
       {contextMenu && contextClip ? (
         <>
           <div className="fixed inset-0 z-[75]" onMouseDown={() => setContextMenu(null)} onContextMenu={(e) => e.preventDefault()} />
-          <div className="qx-menu fixed z-[76] w-52 animate-qx-scale-in py-1"
+          <div className="qx-menu fixed z-[76] w-60 animate-qx-scale-in py-1"
             style={{
-              left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 220)),
-              top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 250)),
+              left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 250)),
+              top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 360)),
             }}>
             <div className="truncate border-b px-3 pb-2 pt-1 text-[10px] text-editor-textMuted"
               style={{ borderColor: "var(--qx-border)" }} title={contextClip.name}>
@@ -410,6 +501,37 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
                 disabled={contextLocked} onClick={() => runContextAction("duplicate")} />
               <ContextAction icon={<Trash2 className="h-3.5 w-3.5" />} label="Delete" shortcut="Del"
                 disabled={contextLocked} onClick={() => runContextAction("delete")} />
+              <ContextAction icon={<span className="text-[10px] font-bold">R</span>} label="Ripple delete" shortcut="⇧Del"
+                disabled={contextLocked} onClick={() => runContextAction("rippleDelete")} />
+              <ContextAction icon={<span className="text-[10px] font-bold">⇤</span>} label="Ripple trim start → playhead"
+                disabled={contextLocked || !canTrimStart} onClick={() => runContextAction("rippleTrimStart")} />
+              <ContextAction icon={<span className="text-[10px] font-bold">⇥</span>} label="Ripple trim end → playhead"
+                disabled={contextLocked || !canTrimEnd} onClick={() => runContextAction("rippleTrimEnd")} />
+              <ContextAction icon={<span className="text-[10px] font-bold">⇤</span>} label="Close gaps on this track"
+                disabled={contextLocked} onClick={() => runContextAction("closeGaps")} />
+              <Separator className="my-1" />
+              <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-editor-textMuted">
+                <Palette className="h-3.5 w-3.5" /> Color label
+              </div>
+              <div className="flex items-center gap-1.5 px-3 pb-1.5">
+                {COLOR_LABELS.map((color) => (
+                  <button key={color.value} type="button" title={color.label}
+                    aria-label={`${color.label} color label`}
+                    onClick={() => {
+                      useProjectStore.getState().setClipColor(
+                        contextClip.id,
+                        contextClip.colorTag === color.value ? undefined : color.value
+                      );
+                      setContextMenu(null);
+                    }}
+                    className="h-4 w-4 rounded-full border border-white/25 transition-transform hover:scale-125"
+                    style={{
+                      background: color.value,
+                      outline: contextClip.colorTag === color.value ? `2px solid ${color.value}` : undefined,
+                      outlineOffset: 2,
+                    }} />
+                ))}
+              </div>
               <Separator className="my-1" />
               <ContextAction icon={<Link2 className="h-3.5 w-3.5" />} label="Group selected" shortcut="Ctrl+G"
                 disabled={contextLocked || tl.selectedClipIds.length < 2} onClick={() => runContextAction("group")} />
@@ -685,8 +807,8 @@ function ClipBlock({
       style={{
         left,
         width,
-        background: `linear-gradient(180deg, ${palette.top}cc 0%, ${palette.bottom}bb 100%)`,
-        borderColor: isSelected ? "var(--qx-accent)" : "rgba(255,255,255,.12)",
+        background: `linear-gradient(180deg, ${clip.colorTag ?? palette.top}cc 0%, ${palette.bottom}bb 100%)`,
+        borderColor: isSelected ? "var(--qx-accent)" : clip.colorTag ?? "rgba(255,255,255,.12)",
         boxShadow: isSelected
           ? "0 0 0 2px var(--qx-accent), 0 8px 20px rgba(0,0,0,.38)"
           : "0 2px 7px rgba(0,0,0,.32)",

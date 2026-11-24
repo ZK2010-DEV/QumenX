@@ -235,6 +235,11 @@ export function App() {
       if (e.code === "Space") {
         e.preventDefault();
         preview.togglePlay();
+      } else if (e.shiftKey && e.key === "Delete" && tl.selectedClipId) {
+        e.preventDefault();
+        const ids = tl.selectedClipIds.length > 1 ? tl.selectedClipIds : [tl.selectedClipId];
+        store.rippleDelete(ids);
+        tl.setSelectedClip(null);
       } else if (e.key === "Delete" || e.key === "Backspace") {
         if (tl.selectedClipId) {
           e.preventDefault();
@@ -255,6 +260,8 @@ export function App() {
         if (clip) store.splitClip(clip.id, preview.currentTime);
       } else if (key === "d" && !meta) {
         if (tl.selectedClipId) store.duplicateClip(tl.selectedClipId);
+      } else if (key === "m" && !meta) {
+        store.addMarker(preview.currentTime);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -441,7 +448,7 @@ function ShortcutsDialog({
 }) {
   const groups = [
     { title: "Project", items: [["New project", "Ctrl+N"], ["Open project", "Ctrl+O"], ["Save project", "Ctrl+S"], ["Import media", "Ctrl+I"]] },
-    { title: "Editing", items: [["Undo", "Ctrl+Z"], ["Redo", "Ctrl+Y"], ["Split at playhead", "S"], ["Duplicate clip", "D"], ["Delete clip", "Del"], ["Group selected", "Ctrl+G"]] },
+    { title: "Editing", items: [["Undo", "Ctrl+Z"], ["Redo", "Ctrl+Y"], ["Split at playhead", "S"], ["Duplicate clip", "D"], ["Delete clip", "Del"], ["Ripple delete", "Shift+Del"], ["Add marker", "M"], ["Group selected", "Ctrl+G"]] },
     { title: "Preview", items: [["Play / pause", "Space"], ["Step one frame", "← / →"], ["Step ten frames", "Shift+← / →"]] },
   ];
   return (

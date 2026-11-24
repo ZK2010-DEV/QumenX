@@ -102,6 +102,13 @@ function cropYavg(file, time, w = 32, h = 32, x = 0, y = 0) {
   return match ? Number(match[1]) : NaN;
 }
 
+function clipStart(clips, id) {
+  return clips.find(c => c.id === id)?.start;
+}
+function clipDuration(clips, id) {
+  return clips.find(c => c.id === id)?.duration;
+}
+
 function projectSignature(p) {
   return {
     id: p.id,
@@ -622,6 +629,88 @@ async function main() {
       r.playingInModal === false && r.playingOutside === true &&
       r.replay?.time === 0 && r.replay?.playing === true, r);
   } catch (e) { record('TEST 11 stability/no-op undo/shortcuts/replay', false, String(e)); }
+
+  // TEST 12 — ripple delete/trim, insert, overwrite, close gaps, markers ------
+  try {
+    const base = project({
+      assets: [asset('v1', 'video', video, 1.2), asset('a1', 'audio', audio, 3)],
+      tracks: [vtrack, atrack],
+      clips: [
+        clip({ id: 'c1', trackId: 'tv', assetId: 'v1', start: 0, duration: 1 }),
+        clip({ id: 'c2', trackId: 'tv', assetId: 'v1', start: 1, duration: 1 }),
+        clip({ id: 'c3', trackId: 'tv', assetId: 'v1', start: 2, duration: 1 }),
+        clip({ id: 'a1', trackId: 'ta', assetId: 'a1', start: 0, duration: 3 }),
+      ],
+    });
+    const setup = await evaluate(`(() => {
+      const stores = window.__QUMENX_STORES__;
+      if (!stores) return { error: 'dev store hook missing' };
+      stores.project.getState().setProject(${JSON.stringify(base)});
+      stores.media.getState().setAssets(${JSON.stringify(base.assets)});
+      stores.project.getState().clearHistory();
+      return { clips: stores.project.getState().project.clips.length };
+    })()`);
+    const opsJson = await evaluate(`(() => {
+      const s = window.__QUMENX_STORES__?.project;
+      if (!s) return JSON.stringify({ error: 'dev store hook missing' });
+      const videoClips = () => s.getState().project.clips
+        .filter(c => c.trackId === 'tv')
+        .map(c => ({ id: c.id, start: +c.start.toFixed(3), duration: +c.duration.toFixed(3) }))
+        .sort((a, b) => a.start - b.start);
+      const clipById = id => videoClips().find(c => c.id === id);
+      const audioStart = () => s.getState().project.clips.find(c => c.id === 'a1')?.start;
+
+      s.getState().rippleDelete(['c2']);
+      const afterRipple = { clips: videoClips(), audio: audioStart() };
+
+      const inserted = s.getState().insertAssetAtPlayhead('v1', 1, 'tv');
+      const afterInsert = videoClips();
+
+      const overwritten = s.getState().overwriteAssetAtPlayhead('v1', 1, 'tv');
+      const afterOverwrite = videoClips();
+
+      s.getState().rippleTrim('c1', 'right', 0.6);
+      const afterTrim = videoClips();
+
+      s.getState().moveClip('c3', 3, 'tv');
+      const beforeClose = clipById('c3');
+      s.getState().closeGaps('tv');
+      const afterClose = videoClips();
+
+      const markerId = s.getState().addMarker(0.5, 'Edit check', '#22d3ee');
+      s.getState().setClipColor('c1', '#3b82f6');
+      const marker = s.getState().project.markers.find(m => m.id === markerId);
+      const color = s.getState().project.clips.find(c => c.id === 'c1')?.colorTag;
+      const history = s.getState().history.past.length;
+      s.getState().clearHistory();
+      return JSON.stringify({
+        afterRipple, inserted, afterInsert, overwritten, afterOverwrite,
+        afterTrim, beforeClose, afterClose,
+        marker: marker ? { time: marker.time, label: marker.label, color: marker.color } : null,
+        color, history,
+      });
+    })()`);
+    const ops = JSON.parse(opsJson);
+    const finalJson = await evaluate(`JSON.stringify(window.__QUMENX_STORES__.project.getState().project)`);
+    const finalProject = JSON.parse(finalJson);
+    const { info } = await exportProject(finalProject, 'test12-timeline-editing');
+    const ok = setup?.clips === 4 && !ops.error
+      && ops.afterRipple.clips.length === 2 && clipStart(ops.afterRipple.clips, 'c3') === 1
+      && ops.afterRipple.audio === 0
+      && !!ops.inserted && clipStart(ops.afterInsert, ops.inserted) === 1
+      && clipStart(ops.afterInsert, 'c3') === 2.2
+      && !!ops.overwritten && !ops.afterOverwrite.some(c => c.id === ops.inserted)
+      && clipStart(ops.afterOverwrite, ops.overwritten) === 1
+      && clipStart(ops.afterTrim, 'c1') === 0 && clipDuration(ops.afterTrim, 'c1') === 0.6
+      && clipStart(ops.afterTrim, ops.overwritten) === 0.6 && clipStart(ops.afterTrim, 'c3') === 1.8
+      && ops.beforeClose?.start === 3 && clipStart(ops.afterClose, 'c3') === 1.8
+      && ops.marker?.time === 0.5 && ops.marker?.label === 'Edit check' && ops.color === '#3b82f6'
+      && ops.history > 0 && Number(info.format.duration) > 2.6;
+    record('TEST 12 ripple/insert/overwrite/markers', ok, {
+      ...ops,
+      export: summarize(info),
+    });
+  } catch (e) { record('TEST 12 ripple/insert/overwrite/markers', false, String(e)); }
 
   const state = await evaluate(`JSON.stringify({title:document.title, nodes:document.querySelectorAll('*').length, isTauri:typeof window.__TAURI_INTERNALS__!=='undefined'})`);
   record('App health / no runtime errors', errors.length === 0, { state: JSON.parse(state), errors });

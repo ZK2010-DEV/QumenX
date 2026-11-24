@@ -29,7 +29,7 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 - Final E2E health check: title `QumenX — Professional Video Editor`, 422 DOM nodes, `isTauri: true`, **zero console errors, zero runtime exceptions**.
 - The dev URL is pinned to `http://127.0.0.1:5173` and Vite starts with `--host 127.0.0.1`. This fixes an environment-specific `localhost` IPv6 timeout that previously produced a blank CDP target. The CDP harness now waits for a genuinely loaded Tauri page and the dev-only store hook before running tests.
 
-### Full E2E suite: 13/13 passed
+### Full E2E suite: 14/14 passed
 
 `run-qmenx-e2e.ps1` launches Vite plus the real debug `qumenx.exe`, drives the app over WebView2 CDP, and invokes real native commands. Every export is written to disk and probed with `ffprobe`.
 
@@ -47,6 +47,7 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 | TEST 9 — static scale preview/export parity | content centroid `yFull=41`, `yHalf=16`; both exports `852x480` |
 | TEST 10 — proxy generation and preview use | proxy created, source unchanged, proxy stream `video:h264:960x540`, preview used `%LOCALAPPDATA%\QumenX\proxies\f601b477609b7a26.mp4` |
 | TEST 11 — no-op undo, modal shortcut isolation, replay at end | `before=0`, `afterClick=0`, `afterDrag=1`, `playingInModal=false`, `playingOutside=true`, replay `time=0`, `playing=true` |
+| TEST 12 — ripple delete/trim, insert, overwrite, close gaps, markers | ripple moved `c3: 2→1`; insert `1.0s` pushed `c3: 2.2s`; overwrite replaced the inserted clip; ripple trim set `c1: 0.6s` and shifted followers; close gaps compacted `c3: 3→1.8`; marker/color label persisted; export `3.00 s`, `h264 852x480`, `aac` |
 | App health / no runtime errors | passed; `errors: []` |
 
 Machine-readable results: `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\results.json`.
@@ -89,7 +90,7 @@ Final table also saved to `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\ffprobe-
 ## What the editor actually does
 
 - **Project model (v2):** tracks, clips, assets, keyframes, effects, transitions, text styling, crop/flip, fades, grouping, audio detach, frame-rate-aware snapping. Version 1 projects are normalized with defaults on load.
-- **Timeline:** real multi-track move/trim/cross-track drag, split, duplicate, delete, group, multi-select, snapping, frame quantization, zoom, waveforms, keyframe diamonds, track resize, playhead, and visibility/mute/lock controls. Locked tracks block clip and keyframe edits and do not create no-op undo entries.
+- **Timeline:** real multi-track move/trim/cross-track drag, split, duplicate, delete, ripple delete, frame-accurate ripple trim, insert and overwrite at the playhead, close gaps, group, multi-select, snapping, frame quantization, zoom presets, fit-to-project, waveforms, keyframe diamonds, markers, color labels, track resize, playhead, and visibility/mute/lock controls. Locked tracks block clip and keyframe edits and do not create no-op undo entries.
 - **Preview:** rAF playback with a synced playhead, source-time mapping for speed/reverse/freeze, proxy source selection with fallback to original media, multi-layer composition, overlays, audio, keyframe interpolation, effects, transitions, fades, text animation, vignette, width/height transform, safe zones, aspect ratios and fullscreen. Editing does not render full-resolution frames.
 - **Tools:** crop, rotate, flip, resize, reverse, freeze, speed, color, transform, text, keyframes, transitions, effects and audio mixing/fades. Inspector, sidebar and menu controls are wired to real store actions.
 - **Undo/redo:** labeled history with consistent multi-operation behavior, verified through real UI buttons in TEST 7.
@@ -111,7 +112,7 @@ Final table also saved to `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\ffprobe-
 
 ## Stability pass (post-v1.0.0)
 
-Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (13/13).
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (14/14).
 
 - Backup rotation now uses millisecond stamps with collision avoidance, so two quick saves cannot overwrite the same `.bak`; `project_list_backups` still reads legacy second-stamped backups.
 - Import failures outside the per-file probe can no longer leave the Import dialog stuck: `importing` is always cleared in `finally`.
@@ -122,6 +123,17 @@ Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd ch
 - Pressing Play at the end of the timeline replays from 0 instead of immediately stopping.
 - Flash notices clear only their own timer, so a newer message is not hidden early.
 - Waveform peak bucketing is clamped to the decoded sample buffer; two Rust unit tests cover short and empty sources.
+
+## Timeline editing pass (post-Milestone 1)
+
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (14/14).
+
+- Ripple delete closes gaps only on the affected unlocked tracks; unrelated audio tracks stay in sync instead of being shifted unexpectedly.
+- Ripple trim moves upstream clips for start-edge trims and downstream clips for end-edge trims, preserving keyframe timing, source offsets, effect state and freeze ranges wherever they remain valid.
+- Insert splits a clip under the playhead and pushes the right-hand segment forward; overwrite replaces only the overlapped timeline range and keeps non-overlapping material.
+- Timeline markers are real v2 project data: add with `M`/toolbar, seek by click, rename by double-click, delete by right-click.
+- Clip color labels, zoom presets, fit-to-project, `Shift+Del` ripple delete, and media-library Insert/Overwrite controls are wired to actual store operations.
+- No IPC command names, E2E selectors, FFmpeg filters or export semantics changed in this pass.
 
 ## Known limitations / notes
 
@@ -143,7 +155,7 @@ cmd /c cargo-gnu.cmd build                      # Rust debug build; run from src
 cmd /c dev-tauri.cmd                            # launch desktop app in dev mode
 cmd /c build-tauri.cmd                          # build MSI + NSIS installers
 powershell -NoProfile -ExecutionPolicy Bypass -File run-qmenx-e2e.ps1
-                                                # full 13-check native IPC + real export E2E
+                                                # full 14-check native IPC + real export E2E
 powershell -NoProfile -ExecutionPolicy Bypass -File run-release-progress.ps1
                                                 # release-binary export/progress smoke test
 ```

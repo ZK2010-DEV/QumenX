@@ -17,3 +17,12 @@ This log records completed development milestones for QumenX. Entries are added 
 - **Scope:** Addressed low-risk, high-impact reliability issues found in the post-v1.0.0 audit: millisecond backup stamps with collision avoidance and backward-compatible backup listing, guaranteed Import dialog cleanup on unexpected errors, modal-aware global shortcuts, lazy undo history for drag/resize gestures, unmount-safe window drag listeners, fresh Export dialog state and live project serialization, replay-at-end playback, non-clobbering flash notices, and panic-free waveform peak bucketing with Rust unit tests.
 - **Verification:** `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (13/13 after adding TEST 11 for no-op undo, modal shortcut isolation and replay-at-end).
 - **Notes:** The E2E runner now waits briefly for Vite to warm up before launching WebView2; this changes only the QA harness. No E2E-critical selectors, IPC command names or export behavior were changed.
+
+## Milestone 2 — professional timeline editing primitives
+
+- **Commit:** `PENDING`
+- **Message:** `Add professional timeline editing primitives`
+- **Date:** 2026-11-24
+- **Scope:** Added real ripple delete, frame-accurate ripple trim, insert and overwrite at the playhead, close gaps, timeline markers with seek/rename/delete, clip color labels, timeline zoom presets and fit-to-project, plus media-library Insert/Overwrite actions and keyboard shortcuts. Operations preserve clip keyframes, effects, source offsets, speed, freeze state and undo history, and respect locked tracks.
+- **Verification:** `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (14/14). TEST 12 verifies ripple deletion, insertion, overwrite replacement, ripple trimming, gap compaction, markers, color labels, and a real FFmpeg export of the edited timeline.
+- **Notes:** Additive only: project version stays `2`, all existing E2E selectors/IPC command names/export behavior are unchanged, and no FFmpeg graph changes were needed.

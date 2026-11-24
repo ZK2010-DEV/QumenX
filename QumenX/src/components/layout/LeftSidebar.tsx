@@ -231,6 +231,18 @@ function MediaLibrary({ audioOnly, showImport, onAddAsset }: {
   }, [assets, query, filterType, audioOnly, sort]);
 
   const selected = visible.find((a) => a.id === selectedId) ?? visible[0] ?? null;
+
+  const placeAtPlayhead = (mode: "insert" | "overwrite", asset: Asset) => {
+    const projectState = useProjectStore.getState();
+    const timeline = useTimelineStore.getState();
+    const selectedClip = projectState.project.clips.find((c) => c.id === timeline.selectedClipId);
+    const time = usePreviewStore.getState().currentTime;
+    const id = mode === "insert"
+      ? projectState.insertAssetAtPlayhead(asset.id, time, selectedClip?.trackId)
+      : projectState.overwriteAssetAtPlayhead(asset.id, time, selectedClip?.trackId);
+    if (id) timeline.setSelectedClip(id);
+  };
+
   const columns = mediaView === "grid" ? 2 : 1;
   const rowHeight = mediaView === "grid" ? 142 : 52;
   const [listRef, scrollTop] = useScrollTop<HTMLDivElement>();
@@ -314,7 +326,15 @@ function MediaLibrary({ audioOnly, showImport, onAddAsset }: {
               </p>
               <p className="truncate text-[9px] text-editor-textMuted">{(selected.size / 1024 / 1024).toFixed(1)} MB · {selected.type}</p>
             </div>
-            <IconButton tooltip="Add to timeline" onClick={() => onAddAsset(selected)} aria-label="Add selected media"><Plus className="h-3.5 w-3.5" /></IconButton>
+            <div className="flex shrink-0 flex-col gap-1">
+              <IconButton tooltip="Add to timeline" onClick={() => onAddAsset(selected)} aria-label="Add selected media"><Plus className="h-3.5 w-3.5" /></IconButton>
+              <IconButton tooltip="Insert at playhead" onClick={() => placeAtPlayhead("insert", selected)} aria-label="Insert selected media at playhead">
+                <span className="text-[10px] font-bold">I</span>
+              </IconButton>
+              <IconButton tooltip="Overwrite at playhead" onClick={() => placeAtPlayhead("overwrite", selected)} aria-label="Overwrite at playhead with selected media">
+                <span className="text-[10px] font-bold">O</span>
+              </IconButton>
+            </div>
           </div>
         ) : null}
       </div>
