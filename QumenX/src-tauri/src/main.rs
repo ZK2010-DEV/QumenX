@@ -6,7 +6,7 @@ use commands::{
     ffmpeg_capabilities, ffmpeg_cancel_export, ffmpeg_export, ffmpeg_probe, ffmpeg_proxy,
     ffmpeg_thumbnail, ffmpeg_thumbnails, ffmpeg_waveform, open_path, project_add_recent, project_list_backups,
     project_open, project_recent, project_restore_backup, project_save, subtitles_read,
-    subtitles_write,
+    subtitles_write, template_delete, template_list, template_save,
 };
 
 fn main() {
@@ -33,6 +33,9 @@ fn main() {
             open_path,
             subtitles_read,
             subtitles_write,
+            template_list,
+            template_save,
+            template_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

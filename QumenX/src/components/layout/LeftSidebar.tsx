@@ -4,7 +4,7 @@ import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plug
 import {
   Film, Music, Type, Smile, Zap, Link2, SlidersHorizontal, Layout,
   Box, Plus, Search, Grid2X2, List, Upload, Folder, Clock, Maximize2,
-  Sparkles, Gauge, Circle, Square, Triangle, ArrowRight, Info, Download, FileText,
+  Sparkles, Gauge, Circle, Square, Triangle, ArrowRight, Info, Download, FileText, Trash2,
 } from "lucide-react";
 import { useMediaStore } from "@/stores/mediaStore";
 import { useProjectStore } from "@/stores/projectStore";
@@ -21,6 +21,10 @@ import { importMediaPaths } from "@/lib/mediaImport";
 import {
   parseSubtitles, readSubtitleFile, serializeSrt, serializeVtt, writeSubtitleFile,
 } from "@/lib/subtitles";
+import {
+  BUILTIN_TEMPLATES, deleteTemplate, listTemplates, saveTemplate,
+  type ProjectTemplate, type TemplateInfo,
+} from "@/lib/templates";
 import { Button } from "@/components/ui/button";
 import { Input, Badge } from "@/components/ui/input";
 import { Select } from "@/components/ui/tabs";
@@ -394,6 +398,128 @@ function useScrollTop<T extends HTMLElement>(): [React.RefObject<T | null>, numb
   return [ref, top];
 }
 
+/* ----------------------------- project templates ---------------------------- */
+
+function TemplateLibrary() {
+  const applyTemplateAction = useProjectStore((s) => s.applyTemplate);
+  const setSelectedClip = useTimelineStore((s) => s.setSelectedClip);
+  const [custom, setCustom] = React.useState<TemplateInfo[]>([]);
+  const [name, setName] = React.useState("");
+  const [status, setStatus] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const refresh = React.useCallback(async () => {
+    try { setCustom(await listTemplates()); }
+    catch { setCustom([]); }
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    listTemplates()
+      .then((items) => { if (active) setCustom(items); })
+      .catch(() => { if (active) setCustom([]); });
+    return () => { active = false; };
+  }, []);
+
+  const apply = (template: ProjectTemplate) => {
+    applyTemplateAction(template);
+    const assets = useProjectStore.getState().project.assets;
+    useMediaStore.getState().setAssets(assets);
+    setSelectedClip(null);
+    setStatus(`Applied “${template.name}”. Your previous project is one undo away.`);
+  };
+
+  const handleSave = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    setStatus("");
+    try {
+      const project = JSON.parse(JSON.stringify(useProjectStore.getState().project)) as ProjectTemplate["project"];
+      await saveTemplate({
+        id: crypto.randomUUID(),
+        name: trimmed,
+        description: "Saved from the current QumenX project",
+        createdAt: Date.now(),
+        project,
+      });
+      setName("");
+      await refresh();
+      setStatus(`Saved “${trimmed}” to your template library.`);
+    } catch (error) {
+      setStatus(`Save failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (template: TemplateInfo) => {
+    setBusy(true);
+    try {
+      await deleteTemplate(template.id);
+      await refresh();
+      setStatus(`Deleted “${template.name}”.`);
+    } catch (error) {
+      setStatus(`Delete failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const renderTemplate = (template: ProjectTemplate, deletable = false) => (
+    <div key={template.id} className="flex items-center gap-2 rounded-md border px-2 py-1.5"
+      style={{ borderColor: "var(--qx-border)" }}>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[10px] font-medium text-editor-text">{template.name}</p>
+        <p className="truncate text-[9px] text-editor-textMuted">{template.description}</p>
+      </div>
+      <Button size="sm" variant="outline" className="h-6 px-2 text-[9px]" onClick={() => apply(template)}>
+        Apply
+      </Button>
+      {deletable ? (
+        <IconButton tooltip={`Delete ${template.name}`} className="!h-6 !w-6 hover:!text-[var(--qx-danger)]"
+          disabled={busy} onClick={() => void handleDelete(template)}>
+          <Trash2 className="h-3 w-3" />
+        </IconButton>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-lg border p-2.5"
+        style={{ borderColor: "var(--qx-border)", background: "var(--qx-panel-raised)" }}>
+        <div className="flex items-center gap-2">
+          <Layout className="h-3.5 w-3.5 text-editor-accent" />
+          <span className="text-[11px] font-semibold text-editor-text">Project templates</span>
+        </div>
+        <p className="mt-1 text-[10px] leading-relaxed text-editor-textMuted">
+          Apply a ready-made timeline setup, or save your current edit for later. Applying is undoable.
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        {BUILTIN_TEMPLATES.map((template) => renderTemplate(template))}
+      </div>
+      {custom.length > 0 ? (
+        <div className="space-y-1.5 border-t pt-2" style={{ borderColor: "var(--qx-border)" }}>
+          <span className="qx-section-label">My templates</span>
+          {custom.map((template) => renderTemplate(template, true))}
+        </div>
+      ) : null}
+      <div className="flex gap-1.5 border-t pt-2" style={{ borderColor: "var(--qx-border)" }}>
+        <Input value={name} onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
+          placeholder="Save current as template" className="h-7 flex-1 text-[10px]"
+          aria-label="Template name" />
+        <Button size="sm" className="h-7 px-2 text-[10px]" disabled={busy || !name.trim()} onClick={() => void handleSave()}>
+          Save current
+        </Button>
+      </div>
+      {status ? <p className="text-[10px] leading-snug text-editor-textMuted">{status}</p> : null}
+    </div>
+  );
+}
+
 /* ------------------------------ caption tools ------------------------------- */
 
 function CaptionTools() {
@@ -522,7 +648,7 @@ function TextWorkspace({ section }: { section: NavSection }) {
     setSelectedClip(id);
   };
 
-  const heading = section === "text" ? "Text presets" : section === "stickers" ? "Emoji stickers" : section === "templates" ? "Title templates" : "Elements";
+  const heading = section === "text" ? "Text presets" : section === "stickers" ? "Emoji stickers" : section === "templates" ? "Project templates" : "Elements";
 
   return (
     <div className="space-y-3 p-3">
@@ -533,6 +659,7 @@ function TextWorkspace({ section }: { section: NavSection }) {
         </p>
       </div>
       {section === "text" ? <CaptionTools /> : null}
+      {section === "templates" ? <TemplateLibrary /> : null}
       <div className={cn("grid gap-2", section === "stickers" || section === "elements" ? "grid-cols-4" : "grid-cols-2")}>
         {section === "text" ? TEXT_PRESETS.map((preset) => (
           <Button key={preset.label} variant="outline" className="justify-start text-[11px]" onClick={() => addTitle(preset.style)}>

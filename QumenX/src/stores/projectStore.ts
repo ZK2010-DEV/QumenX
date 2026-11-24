@@ -8,6 +8,7 @@ import {
 import {
   type CaptionCue, canvasHeight, captionOffsetY, captionTextStyle,
 } from "@/lib/subtitles";
+import type { ProjectTemplate } from "@/lib/templates";
 
 const EMPTY_PROJECT: Project = {
   id: crypto.randomUUID(),
@@ -126,6 +127,8 @@ interface ProjectState {
   addMarker: (time: number, label?: string, color?: string) => string | null;
   updateMarker: (markerId: string, patch: Partial<Marker>) => void;
   removeMarker: (markerId: string) => void;
+  /** Replace the current project with a template (undoable). */
+  applyTemplate: (template: ProjectTemplate) => void;
   updateSettings: (settings: Partial<ProjectSettings>) => void;
   setName: (name: string) => void;
   undo: () => void;
@@ -975,6 +978,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         markers: state.project.markers.filter((m) => m.id !== markerId),
         updatedAt: Date.now(),
       }, "Remove timeline marker");
+    }),
+
+  applyTemplate: (template) =>
+    set((state) => {
+      const next = normalizeProject(template.project);
+      return commit(state, {
+        ...next,
+        id: crypto.randomUUID(),
+        name: template.name || next.name || state.project.name,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        path: undefined,
+      }, `Apply template ${template.name || ""}`.trim());
     }),
 
   updateSettings: (settings) =>

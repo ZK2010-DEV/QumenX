@@ -9,6 +9,7 @@ import { useWorkspaceStore } from "@/stores/workspaceStore";
 import {
   parseSubtitles, serializeSrt, serializeVtt, readSubtitleFile, writeSubtitleFile,
 } from "@/lib/subtitles";
+import { BUILTIN_TEMPLATES } from "@/lib/templates";
 import "./index.css";
 
 // Dev-only inspection hook used by the CDP end-to-end suite. Stripped from
@@ -27,6 +28,7 @@ if (import.meta.env.DEV) {
       readSubtitleFile,
       writeSubtitleFile,
     },
+    templates: { builtin: BUILTIN_TEMPLATES },
   };
 }
 

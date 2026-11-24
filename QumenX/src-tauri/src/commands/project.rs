@@ -24,7 +24,7 @@ pub struct ProjectBackup {
     pub size: u64,
 }
 
-fn app_data_dir() -> Result<PathBuf, String> {
+pub(crate) fn app_data_dir() -> Result<PathBuf, String> {
     let base = dirs::data_dir()
         .ok_or_else(|| "Could not determine app data directory".to_string())?;
     let new_dir = base.join("QumenX");

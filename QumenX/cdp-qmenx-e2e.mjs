@@ -874,6 +874,98 @@ async function main() {
     });
   } catch (e) { record('TEST 14 SRT/VTT captions', false, String(e)); }
 
+  // TEST 15 — project templates: apply, save, list, apply custom, delete -------
+  try {
+    const listBefore = await invoke('template_list', {});
+    if (!listBefore.ok) throw new Error(listBefore.error);
+
+    const appliedJson = await evaluate(`(() => {
+      const s = window.__QUMENX_STORES__;
+      if (!s?.templates) return JSON.stringify({ error: 'template hook missing' });
+      const tpl = s.templates.builtin.find(t => t.id === 'widescreen-intro');
+      if (!tpl) return JSON.stringify({ error: 'built-in template missing' });
+      s.project.getState().applyTemplate(tpl);
+      const p = s.project.getState().project;
+      return JSON.stringify({
+        name: p.name,
+        resolution: p.settings.resolution,
+        aspect: p.settings.aspectRatio,
+        tracks: p.tracks.map(t => t.type),
+        clips: p.clips.map(c => ({ id: c.id, start: c.start, duration: c.duration, hasText: !!c.text })),
+        markers: p.markers.map(m => m.label),
+      });
+    })()`);
+    const applied = JSON.parse(appliedJson);
+    if (applied.error) throw new Error(applied.error);
+
+    const savedJson = await evaluate(`(async () => {
+      try {
+        const id = 'e2e-template-' + Date.now();
+        const project = JSON.parse(JSON.stringify(window.__QUMENX_STORES__.project.getState().project));
+        const tpl = { id, name: 'E2E Saved Template', description: 'Roundtrip', createdAt: Date.now(), project };
+        const r = await window.__TAURI_INTERNALS__.invoke('template_save', { template_json: JSON.stringify(tpl) });
+        return JSON.stringify({ ok: true, id, info: r });
+      } catch (e) {
+        return JSON.stringify({ ok: false, error: String(e), stack: e && e.stack ? e.stack : '' });
+      }
+    })()`);
+    const saved = JSON.parse(savedJson);
+    if (!saved.ok) throw new Error(`template_save: ${saved.error} ${saved.stack || ''}`.trim());
+
+    const listWithCustom = await invoke('template_list', {});
+    const customListed = listWithCustom.ok && listWithCustom.value.some(t => t.id === saved.id && !!t.project);
+
+    const customAppliedJson = await evaluate(`(() => {
+      const s = window.__QUMENX_STORES__;
+      const list = s.project.getState();
+      return JSON.stringify({ hasApply: typeof list.applyTemplate === 'function' });
+    })()`);
+    const customApplied = JSON.parse(customAppliedJson);
+    const customTemplate = listWithCustom.ok ? listWithCustom.value.find(t => t.id === saved.id) : null;
+    if (customTemplate) {
+      await evaluate(`(() => {
+        window.__QUMENX_STORES__.project.getState().applyTemplate(${JSON.stringify(customTemplate)});
+      })()`);
+    }
+    const customName = await evaluate(`window.__QUMENX_STORES__.project.getState().project.name`);
+
+    const deleted = await invoke('template_delete', { id: saved.id });
+    const listAfterDelete = await invoke('template_list', {});
+    const deletedGone = listAfterDelete.ok && !listAfterDelete.value.some(t => t.id === saved.id);
+
+    await evaluate(`(() => {
+      const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Templates');
+      if (b) b.click();
+    })()`);
+    await new Promise(r => setTimeout(r, 120));
+    const templateButtons = JSON.parse(await evaluate(`JSON.stringify(
+      [...document.querySelectorAll('button')].map(b => b.textContent.trim())
+    )`));
+
+    const finalProject = JSON.parse(await evaluate(`JSON.stringify(window.__QUMENX_STORES__.project.getState().project)`));
+    const { info } = await exportProject(finalProject, 'test15-templates');
+    const duration = Number(info.format.duration);
+
+    const ok = !applied.error && applied.name === 'Widescreen intro'
+      && applied.resolution === '1080p' && applied.aspect === '16:9'
+      && applied.tracks.length === 3 && applied.tracks.includes('text')
+      && applied.clips.length === 2 && applied.clips.every(c => c.hasText)
+      && applied.markers.length === 2 && applied.markers[0] === 'Opening title'
+      && saved.info?.ok !== false && customListed && customApplied.hasApply
+      && customName === 'E2E Saved Template'
+      && deleted.ok && deletedGone
+      && templateButtons.includes('Apply') && templateButtons.includes('Save current')
+      && duration > 3.8 && info.streams.some(s => s.codec_type === 'video');
+    record('TEST 15 project templates', ok, {
+      applied,
+      savedId: saved.id,
+      customListed,
+      customApplied,
+      deleted: deleted.ok && deletedGone,
+      export: summarize(info),
+    });
+  } catch (e) { record('TEST 15 project templates', false, String(e)); }
+
   const state = await evaluate(`JSON.stringify({title:document.title, nodes:document.querySelectorAll('*').length, isTauri:typeof window.__TAURI_INTERNALS__!=='undefined'})`);
   record('App health / no runtime errors', errors.length === 0, { state: JSON.parse(state), errors });
   fs.writeFileSync(path.join(tmp, 'results.json'), JSON.stringify({ results, errors }, null, 2));
