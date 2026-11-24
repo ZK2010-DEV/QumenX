@@ -183,7 +183,7 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <button aria-label="Close dialog" className="absolute inset-0 cursor-default bg-black/65" onClick={onClose} />
-      <div className={cn("relative flex max-h-[86vh] w-full flex-col overflow-hidden rounded-xl border shadow-2xl animate-qx-scale-in", width)} style={{ borderColor: "var(--qx-border-strong)", background: "var(--qx-panel)" }}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={cn("relative flex max-h-[86vh] w-full flex-col overflow-hidden rounded-xl border shadow-2xl animate-qx-scale-in", width)} style={{ borderColor: "var(--qx-border-strong)", background: "var(--qx-panel)" }}>
         <header className="flex shrink-0 items-start justify-between gap-4 border-b px-5 py-4" style={{ borderColor: "var(--qx-border)" }}>
           <div>
             <h2 className="text-base font-semibold text-editor-text">{title}</h2>

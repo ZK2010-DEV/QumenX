@@ -32,6 +32,8 @@ export function App() {
   const [showExport, setShowExport] = useState(false);
   const [notice, setNotice] = useState("");
   const savedMeta = useRef<SavedMeta>({ updatedAt: 0 });
+  const noticeTimer = useRef<number | null>(null);
+  const resizeCleanup = useRef<(() => void) | null>(null);
 
   const project = useProjectStore((s) => s.project);
   const setName = useProjectStore((s) => s.setName);
@@ -50,7 +52,16 @@ export function App() {
 
   const flash = useCallback((message: string) => {
     setNotice(message);
-    window.setTimeout(() => setNotice(""), 3200);
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => {
+      setNotice("");
+      noticeTimer.current = null;
+    }, 3200);
+  }, []);
+
+  useEffect(() => () => {
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    resizeCleanup.current?.();
   }, []);
 
   const resetWorkspace = useCallback(() => {
@@ -174,6 +185,8 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
+      // A dialog owns its keyboard interaction. Escape is handled by Modal itself.
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       const meta = e.ctrlKey || e.metaKey;
       const store = useProjectStore.getState();
       const tl = useTimelineStore.getState();
@@ -258,7 +271,10 @@ export function App() {
     const up = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      resizeCleanup.current = null;
     };
+    resizeCleanup.current?.();
+    resizeCleanup.current = up;
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
   };

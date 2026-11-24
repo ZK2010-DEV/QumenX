@@ -104,15 +104,19 @@ fn rotate_backup(target: &Path) {
         return;
     }
     let token = path_token(target);
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let name = format!("{}_{}.bak", token, stamp);
-    let dest = match backup_dir() {
-        Ok(d) => d.join(name),
+    let dir = match backup_dir() {
+        Ok(d) => d,
         Err(_) => return,
     };
+    // Millisecond stamps prevent two quick saves from sharing a backup name.
+    // The extra loop covers the rare same-millisecond collision without ever
+    // overwriting an existing backup.
+    let mut stamp = now_ms();
+    let mut dest = dir.join(format!("{}_{}.bak", token, stamp));
+    while dest.exists() {
+        stamp += 1;
+        dest = dir.join(format!("{}_{}.bak", token, stamp));
+    }
     if fs::copy(target, &dest).is_err() {
         return;
     }
@@ -232,7 +236,8 @@ pub fn project_list_backups(file_path: String) -> Result<Vec<ProjectBackup>, Str
                     .map(|s| s.trim_end_matches(".bak").to_string())
             })
             .and_then(|s| s.parse::<u64>().ok())
-            .map(|secs| secs.saturating_mul(1000))
+            // New backups store milliseconds; legacy backups stored seconds.
+            .map(|raw| if raw >= 100_000_000_000 { raw } else { raw.saturating_mul(1000) })
             .unwrap_or_else(|| {
                 meta.modified()
                     .ok()

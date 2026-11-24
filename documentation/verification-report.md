@@ -29,7 +29,7 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 - Final E2E health check: title `QumenX — Professional Video Editor`, 422 DOM nodes, `isTauri: true`, **zero console errors, zero runtime exceptions**.
 - The dev URL is pinned to `http://127.0.0.1:5173` and Vite starts with `--host 127.0.0.1`. This fixes an environment-specific `localhost` IPv6 timeout that previously produced a blank CDP target. The CDP harness now waits for a genuinely loaded Tauri page and the dev-only store hook before running tests.
 
-### Full E2E suite: 12/12 passed
+### Full E2E suite: 13/13 passed
 
 `run-qmenx-e2e.ps1` launches Vite plus the real debug `qumenx.exe`, drives the app over WebView2 CDP, and invokes real native commands. Every export is written to disk and probed with `ffprobe`.
 
@@ -46,6 +46,7 @@ Final verification was completed on **2026-11-24** against the real desktop appl
 | TEST 8 — mid-clip freeze hold/export | `1.80 s`, `h264 852x480`, `aac`, 44,601 bytes; hold SSIM `0.99974`, post-hold motion SSIM `0.91048` |
 | TEST 9 — static scale preview/export parity | content centroid `yFull=41`, `yHalf=16`; both exports `852x480` |
 | TEST 10 — proxy generation and preview use | proxy created, source unchanged, proxy stream `video:h264:960x540`, preview used `%LOCALAPPDATA%\QumenX\proxies\f601b477609b7a26.mp4` |
+| TEST 11 — no-op undo, modal shortcut isolation, replay at end | `before=0`, `afterClick=0`, `afterDrag=1`, `playingInModal=false`, `playingOutside=true`, replay `time=0`, `playing=true` |
 | App health / no runtime errors | passed; `errors: []` |
 
 Machine-readable results: `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\results.json`.
@@ -108,6 +109,20 @@ Final table also saved to `C:\Users\Gamer\AppData\Local\Temp\qumenx-e2e\ffprobe-
 - Added preview fallback for evicted/missing proxy files; corrected `freezeFrame` to use clip-local time consistently with the Inspector and preview.
 - Replaced the misleading “Drag files here” hint with an honest Import instruction; asset cards now really add the asset to the timeline.
 
+## Stability pass (post-v1.0.0)
+
+Verified with `npm run build`, `npm run lint` (warnings only), `cargo-gnu.cmd check`, `cargo-gnu.cmd build`, `cargo-gnu.cmd test` (2/2), and the full native E2E suite (13/13).
+
+- Backup rotation now uses millisecond stamps with collision avoidance, so two quick saves cannot overwrite the same `.bak`; `project_list_backups` still reads legacy second-stamped backups.
+- Import failures outside the per-file probe can no longer leave the Import dialog stuck: `importing` is always cleared in `finally`.
+- App keyboard shortcuts are ignored while an `aria-modal` dialog is open; Escape remains owned by the dialog.
+- Timeline clip drags, keyframe drags and track resizes push an undo entry only after the first real change; simple selection clicks no longer consume an undo slot or clear redo.
+- Window drag listeners are removed on unmount, preventing stale closures after HMR or panel changes.
+- Reopening Export returns to the normal form instead of showing a stale “Export complete” screen; export now serializes live project state.
+- Pressing Play at the end of the timeline replays from 0 instead of immediately stopping.
+- Flash notices clear only their own timer, so a newer message is not hidden early.
+- Waveform peak bucketing is clamped to the decoded sample buffer; two Rust unit tests cover short and empty sources.
+
 ## Known limitations / notes
 
 - `ffmpeg` and `ffprobe` must be installed and on PATH at runtime (winget `Gyan.FFmpeg.Essentials` 9.0.2 was used here). The app is otherwise fully offline.
@@ -128,7 +143,7 @@ cmd /c cargo-gnu.cmd build                      # Rust debug build; run from src
 cmd /c dev-tauri.cmd                            # launch desktop app in dev mode
 cmd /c build-tauri.cmd                          # build MSI + NSIS installers
 powershell -NoProfile -ExecutionPolicy Bypass -File run-qmenx-e2e.ps1
-                                                # full 12-check native IPC + real export E2E
+                                                # full 13-check native IPC + real export E2E
 powershell -NoProfile -ExecutionPolicy Bypass -File run-release-progress.ps1
                                                 # release-binary export/progress smoke test
 ```

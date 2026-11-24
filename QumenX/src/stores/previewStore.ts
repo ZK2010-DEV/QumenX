@@ -54,7 +54,12 @@ export const usePreviewStore = create<PreviewState>((set) => ({
       return { currentTime: next };
     }),
   setDuration: (d) => set({ duration: d }),
-  togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
+  togglePlay: () => set((state) => {
+    if (state.isPlaying) return { isPlaying: false };
+    // Pressing Play at the end replays from the start instead of stopping again.
+    const atEnd = state.duration > 0 && state.currentTime >= state.duration - 0.0001;
+    return { isPlaying: true, ...(atEnd ? { currentTime: 0 } : {}) };
+  }),
   setVolume: (v) => set({ volume: v, muted: v === 0 }),
   setMuted: (m) => set({ muted: m }),
   setPlaybackRate: (r) => set({ playbackRate: r }),

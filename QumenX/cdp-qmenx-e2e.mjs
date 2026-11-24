@@ -576,6 +576,53 @@ async function main() {
     });
   } catch (e) { record('TEST 10 proxy generation/usage', false, String(e)); }
 
+  // TEST 11 — stability: no-op undo, modal shortcut isolation, replay at end --
+  try {
+    const r = await evaluate(`(async () => {
+      const stores = window.__QUMENX_STORES__;
+      if (!stores) return { error: 'dev store hook missing' };
+      const project = stores.project;
+      const preview = stores.preview;
+      const workspace = stores.workspace;
+      project.getState().clearHistory();
+      const clipEl = document.querySelector('[title^="proxy"]');
+      if (!clipEl) return { error: 'timeline clip missing' };
+      const before = project.getState().history.past.length;
+      clipEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 100, clientY: 100 }));
+      await new Promise(r => setTimeout(r, 80));
+      const afterClick = project.getState().history.past.length;
+      window.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 180, clientY: 100 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 80));
+      const afterDrag = project.getState().history.past.length;
+
+      preview.getState().setPlaying(false);
+      workspace.getState().setShortcutsOpen(true);
+      await new Promise(r => setTimeout(r, 80));
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }));
+      await new Promise(r => setTimeout(r, 80));
+      const playingInModal = preview.getState().isPlaying;
+      workspace.getState().setShortcutsOpen(false);
+      await new Promise(r => setTimeout(r, 80));
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }));
+      await new Promise(r => setTimeout(r, 80));
+      const playingOutside = preview.getState().isPlaying;
+
+      preview.getState().setPlaying(false);
+      preview.getState().setDuration(2);
+      preview.getState().setCurrentTime(2);
+      preview.getState().togglePlay();
+      const replay = { time: preview.getState().currentTime, playing: preview.getState().isPlaying };
+      preview.getState().setPlaying(false);
+      project.getState().clearHistory();
+      return { before, afterClick, afterDrag, playingInModal, playingOutside, replay };
+    })()`);
+    record('TEST 11 stability/no-op undo/shortcuts/replay',
+      !r?.error && r.before === 0 && r.afterClick === 0 && r.afterDrag === 1 &&
+      r.playingInModal === false && r.playingOutside === true &&
+      r.replay?.time === 0 && r.replay?.playing === true, r);
+  } catch (e) { record('TEST 11 stability/no-op undo/shortcuts/replay', false, String(e)); }
+
   const state = await evaluate(`JSON.stringify({title:document.title, nodes:document.querySelectorAll('*').length, isTauri:typeof window.__TAURI_INTERNALS__!=='undefined'})`);
   record('App health / no runtime errors', errors.length === 0, { state: JSON.parse(state), errors });
   fs.writeFileSync(path.join(tmp, 'results.json'), JSON.stringify({ results, errors }, null, 2));

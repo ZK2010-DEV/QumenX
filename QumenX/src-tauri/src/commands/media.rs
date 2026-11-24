@@ -286,19 +286,44 @@ pub fn ffmpeg_waveform(path: String, samples: i32) -> Result<Vec<f64>, String> {
         .chunks_exact(4)
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect();
+    Ok(waveform_peaks(&values, samples))
+}
+
+/// Reduce decoded audio to `samples` peak buckets. Ranges are proportional and
+/// clamped so a short or silent source can never index past the buffer.
+fn waveform_peaks(values: &[f32], samples: i32) -> Vec<f64> {
     if values.is_empty() {
-        return Ok(vec![]);
+        return vec![];
     }
+    let len = values.len();
     let samples = samples.max(1) as usize;
-    let bucket = (values.len() / samples).max(1);
     let mut peaks = Vec::with_capacity(samples);
     for i in 0..samples {
-        let start = i * bucket;
-        let end = if i + 1 == samples { values.len() } else { (i + 1) * bucket };
+        let start = (i * len / samples).min(len);
+        let end = (((i + 1) * len / samples).max(start + 1)).min(len);
         let peak = values[start..end]
             .iter()
             .fold(0.0_f32, |acc, v| acc.max(v.abs()));
         peaks.push(peak as f64);
     }
-    Ok(peaks)
+    peaks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::waveform_peaks;
+
+    #[test]
+    fn waveform_bucketing_handles_buffers_shorter_than_requested_samples() {
+        let peaks = waveform_peaks(&[0.0, 1.0, -1.0], 160);
+        assert_eq!(peaks.len(), 160);
+        assert!(peaks.iter().all(|p| p.is_finite()));
+        assert!(peaks.iter().take(110).any(|p| *p > 0.9));
+    }
+
+    #[test]
+    fn waveform_bucketing_preserves_empty_and_single_sample_sources() {
+        assert!(waveform_peaks(&[], 160).is_empty());
+        assert_eq!(waveform_peaks(&[0.5], 8), vec![0.5; 8]);
+    }
 }

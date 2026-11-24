@@ -23,12 +23,21 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
     setImporting(true);
     setProgress(0);
     setFailed([]);
-    const result = await importMediaPaths(paths, (value, name) => {
-      setProgress(value);
-      setCurrentName(name);
-    });
-    setFailed(result.failed);
-    setImporting(false);
+    try {
+      const result = await importMediaPaths(paths, (value, name) => {
+        setProgress(value);
+        setCurrentName(name);
+      });
+      setFailed(result.failed);
+    } catch (err) {
+      // A failure outside the per-file probe must not lock the dialog.
+      setFailed([{
+        name: paths.map((p) => p.split(/[/\\]/).pop() || p).join(", "),
+        error: err instanceof Error ? err.message : String(err),
+      }]);
+    } finally {
+      setImporting(false);
+    }
   };
 
   const handleImport = async () => {

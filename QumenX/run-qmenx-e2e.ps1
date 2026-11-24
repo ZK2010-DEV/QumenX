@@ -11,6 +11,8 @@ for ($i = 0; $i -lt 60; $i++) {
   if (netstat -ano | Select-String ':5173\s+.*LISTENING') { break }
   Start-Sleep -Milliseconds 500
 }
+# Give Vite a moment to finish module graph warm-up before WebView2 loads it.
+Start-Sleep -Seconds 3
 
 Write-Output 'Starting QumenX...'
 $app = Start-Process -FilePath 'C:\Users\Gamer\capcut-target\debug\qumenx.exe' -WorkingDirectory $root -PassThru -RedirectStandardError (Join-Path $root 'app-stderr.log') -RedirectStandardOutput (Join-Path $root 'app-stdout.log')

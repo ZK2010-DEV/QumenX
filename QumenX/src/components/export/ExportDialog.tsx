@@ -122,6 +122,16 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
 
   React.useEffect(() => () => { void cleanupListeners(); }, [cleanupListeners]);
 
+  // A completed export must not make the next open look like a results screen.
+  const wasOpen = React.useRef(open);
+  React.useEffect(() => {
+    if (open && !wasOpen.current && !runningRef.current) {
+      setStatus("idle");
+      setError("");
+    }
+    wasOpen.current = open;
+  }, [open]);
+
   const chooseFolder = async () => {
     const sel = await openFolderDialog({ directory: true, multiple: false });
     if (typeof sel === "string") setOutputPath(sel);
@@ -147,16 +157,17 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     cancelledRef.current = false;
     const sep = outputPath.includes("/") && !outputPath.includes("\\") ? "/" : "\\";
     const out = `${outputPath.replace(/[\\/]+$/, "")}${sep}${safeFileName(fileName)}.${format}`;
+    const currentProject = useProjectStore.getState().project;
     const settings: ProjectSettings = {
-      ...project.settings,
+      ...currentProject.settings,
       resolution,
       fps,
       codec,
       crf,
       audioBitrate,
-      aspectRatio: project.settings.aspectRatio,
+      aspectRatio: currentProject.settings.aspectRatio,
     };
-    const projectJson = serializeProject({ ...project, settings });
+    const projectJson = serializeProject({ ...currentProject, settings });
 
     setStatus("exporting");
     setError("");

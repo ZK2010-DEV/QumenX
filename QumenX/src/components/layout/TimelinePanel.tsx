@@ -68,6 +68,20 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
   const toggleTimeline = useWorkspaceStore((s) => s.toggleTimeline);
   const [contextMenu, setContextMenu] = React.useState<{ x: number; y: number; clipId: string } | null>(null);
 
+  const dragCleanup = React.useRef<(() => void) | null>(null);
+  React.useEffect(() => () => dragCleanup.current?.(), []);
+  const listenWhileDragging = (move: (ev: MouseEvent) => void) => {
+    dragCleanup.current?.();
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      dragCleanup.current = null;
+    };
+    dragCleanup.current = up;
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
   React.useEffect(() => {
     if (!contextMenu) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setContextMenu(null); };
@@ -110,17 +124,17 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
     e.preventDefault();
     e.stopPropagation();
     const startY = e.clientY;
-    useProjectStore.getState().pushHistory("Resize track");
+    let pushed = false;
     const move = (ev: MouseEvent) => {
       const height = Math.max(32, Math.min(240, currentHeight + ev.clientY - startY));
+      if (height === currentHeight) return;
+      if (!pushed) {
+        pushed = true;
+        useProjectStore.getState().pushHistory("Resize track");
+      }
       useProjectStore.getState().updateTrackLive(trackId, { height });
     };
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    listenWhileDragging(move);
   };
 
   const selectedClip = clips.find((c) => c.id === tl.selectedClipId);
@@ -301,13 +315,7 @@ export function TimelinePanel({ onAddAsset }: { onAddAsset: (asset: Asset) => vo
                 if (e.button !== 0) return;
                 const rect = e.currentTarget.getBoundingClientRect();
                 seekFromRuler(e.clientX, rect);
-                const move = (ev: MouseEvent) => seekFromRuler(ev.clientX, rect);
-                const up = () => {
-                  window.removeEventListener("mousemove", move);
-                  window.removeEventListener("mouseup", up);
-                };
-                window.addEventListener("mousemove", move);
-                window.addEventListener("mouseup", up);
+                listenWhileDragging((ev: MouseEvent) => seekFromRuler(ev.clientX, rect));
               }}
             >
               <div className="relative h-full">
@@ -528,6 +536,20 @@ function ClipBlock({
   clip, asset, zoom, isSelected, showKeyframes, keyframeFilter, showWaveforms, locked,
   selectedIds, allClips, onSelect, onContextMenu, onPreview, onBeginTransaction, snapTime, trackAtY, fps,
 }: ClipBlockProps) {
+  const dragCleanup = React.useRef<(() => void) | null>(null);
+  React.useEffect(() => () => dragCleanup.current?.(), []);
+  const listenWhileDragging = (move: (ev: MouseEvent) => void) => {
+    dragCleanup.current?.();
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      dragCleanup.current = null;
+    };
+    dragCleanup.current = up;
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
   const palette = clip.text
     ? { top: "#f59e0b", bottom: "#92400e" }
     : asset?.type === "audio"
@@ -569,7 +591,13 @@ function ClipBlock({
     const origDuration = clip.duration;
     const origOffset = clip.sourceOffset;
     const speedAbs = Math.max(0.01, Math.abs(clip.speed || 1));
-    onBeginTransaction();
+    let pushed = false;
+    // Selecting a clip is not an edit; only push history once it really moves.
+    const ensureHistory = () => {
+      if (pushed) return;
+      pushed = true;
+      onBeginTransaction();
+    };
 
     // Ctrl/Cmd multi-selection moves together; otherwise a group moves as one.
     const moveIds = selectedIds.includes(clip.id)
@@ -593,16 +621,28 @@ function ClipBlock({
             },
           };
         });
+        const changed = updates.some(({ id, patch }) => {
+          const source = allClips.find((c) => c.id === id) ?? clip;
+          return patch.start !== source.start
+            || (patch.trackId !== undefined && patch.trackId !== source.trackId);
+        });
+        if (!changed) return;
+        ensureHistory();
         useProjectStore.getState().updateClipsLive(updates);
       } else if (mode === "right") {
         const maxBySource = asset?.duration
           ? Math.max(0, (asset.duration - origOffset) / speedAbs)
           : origDuration + dx;
         const nextDuration = Math.max(1 / fps, Math.min(origDuration + dx, maxBySource));
-        onPreview({ duration: snapTime(origStart + nextDuration, clip.id) - origStart });
+        const patchedDuration = snapTime(origStart + nextDuration, clip.id) - origStart;
+        if (Math.abs(patchedDuration - origDuration) < 1e-6) return;
+        ensureHistory();
+        onPreview({ duration: patchedDuration });
       } else {
         const nextStart = snapTime(Math.max(0, Math.min(origStart + dx, origStart + origDuration - 1 / fps)), clip.id);
+        if (nextStart === origStart) return;
         const delta = nextStart - origStart;
+        ensureHistory();
         onPreview({
           start: nextStart,
           duration: Math.max(1 / fps, origDuration - delta),
@@ -610,12 +650,7 @@ function ClipBlock({
         });
       }
     };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    listenWhileDragging(onMove);
   };
 
   const startKeyframeDrag = (e: React.MouseEvent, keyframeId: string, originalTime: number) => {
@@ -624,18 +659,18 @@ function ClipBlock({
     e.preventDefault();
     if (locked) return;
     const startX = e.clientX;
-    useProjectStore.getState().pushHistory("Move keyframe");
+    let pushed = false;
     const onMove = (ev: MouseEvent) => {
       const raw = originalTime + (ev.clientX - startX) / zoom;
       const time = snapTimeToFrame(Math.max(0, Math.min(clip.duration, raw)), fps);
+      if (time === originalTime) return;
+      if (!pushed) {
+        pushed = true;
+        useProjectStore.getState().pushHistory("Move keyframe");
+      }
       useProjectStore.getState().updateKeyframeLive(clip.id, keyframeId, { time });
     };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    listenWhileDragging(onMove);
   };
 
   const width = Math.max(24, clip.duration * zoom);
