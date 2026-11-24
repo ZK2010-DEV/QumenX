@@ -20,7 +20,7 @@ This log records completed development milestones for QumenX. Entries are added 
 
 ## Milestone 2 — professional timeline editing primitives
 
-- **Commit:** `PENDING`
+- **Commit:** `f1d4b4b9598bed2f6541c1eeab1d8159df24da5e`
 - **Message:** `Add professional timeline editing primitives`
 - **Date:** 2026-11-24
 - **Scope:** Added real ripple delete, frame-accurate ripple trim, insert and overwrite at the playhead, close gaps, timeline markers with seek/rename/delete, clip color labels, timeline zoom presets and fit-to-project, plus media-library Insert/Overwrite actions and keyboard shortcuts. Operations preserve clip keyframes, effects, source offsets, speed, freeze state and undo history, and respect locked tracks.
