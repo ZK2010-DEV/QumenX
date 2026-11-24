@@ -15,10 +15,11 @@ import {
   PanelRight,
 } from "lucide-react";
 import {
-  type AudioDsp, type Clip, type EffectKind, type KeyframeProperty,
-  type TextAnimationKind, type TransitionKind, DEFAULT_TEXT,
+  type AudioDsp, type Clip, type EffectKind, type KeyframeProperty, type MaskKind,
+  type TextAnimationKind, type TransitionKind, DEFAULT_MASK, DEFAULT_TEXT,
 } from "@/types/project";
 import { AUDIO_DSP_PRESETS, audioDspIsActive, resolveAudioDsp } from "@/lib/audioDsp";
+import { MASK_PRESETS, resolveMask } from "@/lib/masks";
 import { cn } from "@/lib/utils";
 
 type Tab = "transform" | "color" | "audio" | "text" | "keyframes" | "actions";
@@ -70,6 +71,10 @@ export function InspectorPanel() {
   const dsp = resolveAudioDsp(clip?.audioDsp);
   const setDsp = (patch: Partial<AudioDsp>) => {
     if (clip) updateClip(clip.id, { audioDsp: { ...dsp, ...patch } });
+  };
+  const mask = resolveMask(clip?.mask);
+  const setMask = (patch: Partial<typeof mask>) => {
+    if (clip) updateClip(clip.id, { mask: { ...mask, ...patch } });
   };
 
   const startResize = (e: React.MouseEvent) => {
@@ -244,6 +249,59 @@ export function InspectorPanel() {
                 </div>
               </div>
             </Collapsible>
+
+            {!clip.text && (
+              <Collapsible title="Mask" defaultOpen={false}>
+                <div className="space-y-2.5" data-testid="mask-controls">
+                  <div className="grid grid-cols-3 gap-1">
+                    {(["none", "rectangle", "ellipse"] as MaskKind[]).map((kind) => (
+                      <Button key={kind} size="sm" className="text-[10px]"
+                        variant={mask.kind === kind ? "default" : "outline"}
+                        data-testid={`mask-kind-${kind}`}
+                        onClick={() => setMask({ kind })}>
+                        {kind === "none" ? "None" : kind === "rectangle" ? "Rectangle" : "Ellipse"}
+                      </Button>
+                    ))}
+                  </div>
+                  {mask.kind !== "none" && (
+                    <>
+                      <div className="grid grid-cols-2 gap-1">
+                        {MASK_PRESETS.map((preset) => (
+                          <Button key={preset.id} size="sm" variant="outline" className="text-[10px]"
+                            onClick={() => updateClip(clip.id, { mask: { ...preset.mask } })}>
+                            {preset.label}
+                          </Button>
+                        ))}
+                      </div>
+                      <SliderRow label="Center X (%)" value={Math.round(mask.x * 100)} min={0} max={100} step={1}
+                        onChange={(v) => setMask({ x: v / 100 })} />
+                      <SliderRow label="Center Y (%)" value={Math.round(mask.y * 100)} min={0} max={100} step={1}
+                        onChange={(v) => setMask({ y: v / 100 })} />
+                      <SliderRow label="Width (%)" value={Math.round(mask.width * 100)} min={1} max={100} step={1}
+                        onChange={(v) => setMask({ width: v / 100 })} />
+                      <SliderRow label="Height (%)" value={Math.round(mask.height * 100)} min={1} max={100} step={1}
+                        onChange={(v) => setMask({ height: v / 100 })} />
+                      <SliderRow label="Rotation (°)" value={mask.rotation} min={-180} max={180} step={1}
+                        onChange={(v) => setMask({ rotation: v })} />
+                      <SliderRow label="Feather (%)" value={Math.round(mask.feather * 100)} min={0} max={50} step={1}
+                        onChange={(v) => setMask({ feather: v / 100 })} />
+                      <label className="flex items-center gap-2 text-[11px] text-editor-text">
+                        <input type="checkbox" checked={mask.invert} data-testid="mask-invert"
+                          onChange={(e) => setMask({ invert: e.target.checked })} /> Invert mask
+                      </label>
+                      <Button size="sm" variant="ghost" className="w-full text-[10px]"
+                        data-testid="mask-reset"
+                        onClick={() => updateClip(clip.id, { mask: { ...DEFAULT_MASK } })}>
+                        Reset mask
+                      </Button>
+                    </>
+                  )}
+                  <p className="text-[9px] leading-relaxed text-editor-textMuted">
+                    Masks are real clip data: previewed with CSS and exported through an FFmpeg alpha mask.
+                  </p>
+                </div>
+              </Collapsible>
+            )}
           </>
         )}
 

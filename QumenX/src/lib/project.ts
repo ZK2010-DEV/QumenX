@@ -3,6 +3,7 @@ import {
   Project,
   DEFAULT_SETTINGS,
   DEFAULT_CROP,
+  DEFAULT_MASK,
   DEFAULT_TEXT,
   newAsset,
 } from "@/types/project";
@@ -90,6 +91,7 @@ export function deserializeProject(json: string): Project {
       volume: c.volume ?? 1,
       zIndex: c.zIndex ?? 0,
       crop: { ...DEFAULT_CROP, ...(c.crop ?? {}) },
+      mask: c.mask ? { ...DEFAULT_MASK, ...c.mask } : undefined,
       flipH: c.flipH ?? false,
       flipV: c.flipV ?? false,
       fadeIn: c.fadeIn ?? 0,

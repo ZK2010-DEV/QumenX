@@ -3,7 +3,7 @@ import {
   type Project, type Clip, type Track, type Asset, type ProjectSettings,
   type Keyframe, type KeyframeProperty, type TextStyle, type EffectKind,
   type TransitionKind, type Crop, type Marker, DEFAULT_SETTINGS, DEFAULT_CROP,
-  DEFAULT_AUDIO_DSP, DEFAULT_TEXT, DEFAULT_TRANSFORM, newClip, newTrack, snapTimeToFrame,
+  DEFAULT_AUDIO_DSP, DEFAULT_MASK, DEFAULT_TEXT, DEFAULT_TRANSFORM, newClip, newTrack, snapTimeToFrame,
 } from "@/types/project";
 import {
   type CaptionCue, canvasHeight, captionOffsetY, captionTextStyle,
@@ -53,6 +53,7 @@ function normalizeProject(p: Project): Project {
       muted: c.muted ?? false,
       zIndex: c.zIndex ?? 0,
       crop: { ...DEFAULT_CROP, ...(c.crop ?? {}) },
+      mask: c.mask ? { ...DEFAULT_MASK, ...c.mask } : undefined,
       flipH: c.flipH ?? false,
       flipV: c.flipV ?? false,
       fadeIn: c.fadeIn ?? 0,

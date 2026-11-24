@@ -33,7 +33,7 @@ function clip(o) {
     muted: o.muted ?? false, volume: o.volume ?? 1, zIndex: o.zIndex ?? 0,
     transitionIn: o.transitionIn, transitionOut: o.transitionOut,
     fadeIn: o.fadeIn, fadeOut: o.fadeOut, audioFadeIn: o.audioFadeIn,
-    audioFadeOut: o.audioFadeOut, audioDsp: o.audioDsp, text: o.text,
+    audioFadeOut: o.audioFadeOut, audioDsp: o.audioDsp, mask: o.mask, text: o.text,
     freeze: o.freeze, groupId: o.groupId,
   };
 }
@@ -143,7 +143,7 @@ function projectSignature(p) {
       opacity: c.opacity, volume: c.volume,
       keyframes: (c.keyframes || []).map(k => ({ property: k.property, time: k.time, value: k.value })),
       effects: (c.effects || []).map(e => ({ kind: e.kind, value: e.value, enabled: e.enabled })),
-      freeze: c.freeze, transitionIn: c.transitionIn, text: c.text?.text,
+      freeze: c.freeze, transitionIn: c.transitionIn, mask: c.mask, text: c.text?.text,
     })),
   };
 }
@@ -1087,6 +1087,108 @@ async function main() {
       onExport: summarize(onExport.info),
     });
   } catch (e) { record('TEST 16 audio DSP export', false, String(e)); }
+
+  // TEST 17 — clip masks in preview, persistence and real export ------------
+  try {
+    const maskSource = path.join(tmp, 'mask-source.mp4');
+    execFileSync('ffmpeg', [
+      '-y', '-hide_banner', '-loglevel', 'error',
+      '-f', 'lavfi', '-i', 'color=c=white:s=320x180:d=2',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', maskSource,
+    ]);
+    const ellipseMask = {
+      kind: 'ellipse', x: 0.5, y: 0.5, width: 0.5, height: 0.8,
+      rotation: 0, feather: 0, invert: false,
+    };
+    const makeMaskProject = (mask) => project({
+      assets: [asset('mask-v', 'video', maskSource, 2)],
+      tracks: [vtrack],
+      clips: [clip({ id: 'mask-clip', trackId: 'tv', assetId: 'mask-v', start: 0, duration: 2, mask })],
+    });
+    const normal = await exportProject(makeMaskProject(ellipseMask), 'test17-mask');
+    const inverted = await exportProject(makeMaskProject({ ...ellipseMask, invert: true }), 'test17-mask-invert');
+    const normalCorner = cropYavg(normal.out, 1, 32, 32, 0, 0);
+    const normalCenter = cropYavg(normal.out, 1, 32, 32, 411, 224);
+    const invertCorner = cropYavg(inverted.out, 1, 32, 32, 0, 0);
+    const invertCenter = cropYavg(inverted.out, 1, 32, 32, 411, 224);
+
+    const maskProject = makeMaskProject(ellipseMask);
+    const maskProjectPath = path.join(tmp, 'mask-project.json');
+    const saved = await invoke('project_save', { project_json: JSON.stringify(maskProject), file_path: maskProjectPath });
+    const opened = await invoke('project_open', { file_path: maskProjectPath });
+    const reopened = opened.ok ? JSON.parse(opened.value) : {};
+    const reopenedMask = (reopened.clips || []).find(c => c.id === 'mask-clip')?.mask;
+
+    await evaluate(`(() => {
+      const s = window.__QUMENX_STORES__;
+      s.project.getState().setProject(${JSON.stringify(maskProject)});
+      s.media.getState().setAssets(${JSON.stringify(maskProject.assets)});
+      s.timeline.getState().setSelectedClip('mask-clip');
+      s.timeline.getState().setPlayheadTime(1);
+      s.preview.getState().setCurrentTime(1);
+      return true;
+    })()`);
+    await new Promise(r => setTimeout(r, 160));
+    const maskTabClicked = await evaluate(`(() => {
+      const b = document.querySelector('[data-testid="inspector-tab-transform"]');
+      if (!b) return false;
+      b.click();
+      return true;
+    })()`);
+    await new Promise(r => setTimeout(r, 120));
+    const maskOpened = await evaluate(`(() => {
+      const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Mask');
+      if (!b) return false;
+      b.click();
+      return true;
+    })()`);
+    await new Promise(r => setTimeout(r, 160));
+    const maskUi = JSON.parse(await evaluate(`JSON.stringify((() => {
+      const buttons = [...document.querySelectorAll('button')].map(b => b.textContent.trim());
+      const controls = !!document.querySelector('[data-testid="mask-controls"]');
+      const rect = document.querySelector('[data-testid="mask-kind-rectangle"]');
+      if (rect) rect.click();
+      const afterKind = window.__QUMENX_STORES__.project.getState().project.clips
+        .find(c => c.id === 'mask-clip')?.mask?.kind;
+      const invert = document.querySelector('[data-testid="mask-invert"]');
+      if (invert) invert.click();
+      const afterInvert = window.__QUMENX_STORES__.project.getState().project.clips
+        .find(c => c.id === 'mask-clip')?.mask?.invert;
+      const video = document.querySelector('video');
+      const previewMask = !!video && getComputedStyle(video).maskImage !== 'none';
+      return { buttons, controls, afterKind, afterInvert, invert: !!invert, previewMask };
+    })())`));
+    const uiOk = maskTabClicked && maskOpened && maskUi.controls
+      && maskUi.afterKind === 'rectangle'
+      && maskUi.afterInvert === true
+      && maskUi.invert
+      && maskUi.previewMask
+      && ['Rectangle', 'Ellipse', 'Circle', 'Portrait', 'Letterbox', 'Rounded', 'Reset mask']
+        .every(label => maskUi.buttons.includes(label));
+
+    const ok = normal.info.streams.some(s => s.codec_type === 'video')
+      && inverted.info.streams.some(s => s.codec_type === 'video')
+      && normalCorner < 40 && normalCenter > 180
+      && invertCorner > 180 && invertCenter < 40
+      && saved.ok && opened.ok
+      && reopenedMask?.kind === 'ellipse'
+      && Math.abs((reopenedMask?.width ?? 0) - 0.5) < 1e-6
+      && Math.abs((reopenedMask?.height ?? 0) - 0.8) < 1e-6
+      && uiOk;
+    record('TEST 17 clip masks', ok, {
+      luma: {
+        normal: { corner: normalCorner, center: normalCenter },
+        inverted: { corner: invertCorner, center: invertCenter },
+      },
+      persisted: reopenedMask,
+      uiOk,
+      maskTabClicked,
+      maskOpened,
+      maskUi,
+      normalExport: summarize(normal.info),
+      invertedExport: summarize(inverted.info),
+    });
+  } catch (e) { record('TEST 17 clip masks', false, String(e)); }
 
   const state = await evaluate(`JSON.stringify({title:document.title, nodes:document.querySelectorAll('*').length, isTauri:typeof window.__TAURI_INTERNALS__!=='undefined'})`);
   record('App health / no runtime errors', errors.length === 0, { state: JSON.parse(state), errors });

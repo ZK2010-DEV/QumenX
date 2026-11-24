@@ -36,6 +36,20 @@ export interface AudioDsp {
 }
 export interface Crop { top: number; right: number; bottom: number; left: number; }
 
+export type MaskKind = "none" | "rectangle" | "ellipse";
+
+/** Normalized (0..1) mask geometry applied to a media clip in preview and export. */
+export interface ClipMask {
+  kind: MaskKind;
+  x: number;         // center X, 0..1 of the clip frame
+  y: number;         // center Y, 0..1
+  width: number;     // 0..1
+  height: number;    // 0..1
+  rotation: number;  // degrees
+  feather: number;   // edge softness, 0..0.5 of the shorter side
+  invert: boolean;
+}
+
 export interface Transform {
   position: Point;       // pixel offset from center in preview coords
   scale: number;         // 1.0 = 100%
@@ -104,6 +118,7 @@ export interface Clip {
   colorTag?: string;
   // --- editing-engine fields (all optional for backward compatibility) ---
   crop?: Crop;
+  mask?: ClipMask;
   flipH?: boolean;
   flipV?: boolean;
   freeze?: { enabled: boolean; at: number; duration: number };
@@ -215,6 +230,17 @@ export const DEFAULT_SETTINGS: ProjectSettings = {
 };
 
 export const DEFAULT_CROP: Crop = { top: 0, right: 0, bottom: 0, left: 0 };
+
+export const DEFAULT_MASK: ClipMask = {
+  kind: "none",
+  x: 0.5,
+  y: 0.5,
+  width: 0.5,
+  height: 0.5,
+  rotation: 0,
+  feather: 0,
+  invert: false,
+};
 
 export const DEFAULT_AUDIO_DSP: AudioDsp = {
   enabled: false,

@@ -50,6 +50,18 @@ struct Freeze {
 }
 
 #[derive(Clone, Default)]
+struct Mask {
+    kind: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    rotation: f64,
+    feather: f64,
+    invert: bool,
+}
+
+#[derive(Clone, Default)]
 struct AudioDsp {
     enabled: bool,
     highpass_hz: f64,
@@ -121,6 +133,7 @@ struct ClipDef {
     asset_width: i32,
     asset_height: i32,
     freeze: Option<Freeze>,
+    mask: Option<Mask>,
     audio_dsp: AudioDsp,
     keyframes: HashMap<String, Vec<Kf>>,
     effects: Vec<Effect>,
@@ -165,6 +178,29 @@ fn parse_audio_dsp(v: Option<&Value>) -> AudioDsp {
     dsp.attack_ms = num(o.get("attackMs"), 10.0).clamp(1.0, 200.0);
     dsp.release_ms = num(o.get("releaseMs"), 180.0).clamp(10.0, 2000.0);
     dsp
+}
+
+fn parse_mask(v: Option<&Value>) -> Option<Mask> {
+    let o = v?.as_object()?;
+    let kind = text(o.get("kind"), "none");
+    if kind != "rectangle" && kind != "ellipse" {
+        return None;
+    }
+    let raw_width = num(o.get("width"), 0.5);
+    let raw_height = num(o.get("height"), 0.5);
+    if raw_width <= 0.0 || raw_height <= 0.0 {
+        return None;
+    }
+    Some(Mask {
+        kind,
+        x: num(o.get("x"), 0.5).clamp(0.0, 1.0),
+        y: num(o.get("y"), 0.5).clamp(0.0, 1.0),
+        width: raw_width.clamp(0.01, 1.0),
+        height: raw_height.clamp(0.01, 1.0),
+        rotation: num(o.get("rotation"), 0.0).clamp(-360.0, 360.0),
+        feather: num(o.get("feather"), 0.0).clamp(0.0, 0.5),
+        invert: boolean(o.get("invert"), false),
+    })
 }
 
 fn collect_clips(project: &Value) -> Result<(Vec<ClipDef>, f64), String> {
@@ -331,6 +367,7 @@ fn collect_clips(project: &Value) -> Result<(Vec<ClipDef>, f64), String> {
                 asset_width: int(asset.get("width"), 0) as i32,
                 asset_height: int(asset.get("height"), 0) as i32,
                 freeze,
+                mask: parse_mask(c.get("mask")),
                 audio_dsp: parse_audio_dsp(c.get("audioDsp")),
                 keyframes,
                 effects,
@@ -366,6 +403,55 @@ fn collect_clips(project: &Value) -> Result<(Vec<ClipDef>, f64), String> {
 fn fnum(x: f64) -> String {
     let s = format!("{:.5}", x);
     s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// Build an FFmpeg `geq` alpha expression for a clip's normalized mask.
+/// The clip canvas is `w x h`; rotation, feather and inversion are all
+/// evaluated per pixel so the exported result matches the CSS preview.
+fn mask_alpha_expr(mask: &Mask, w: i32, h: i32) -> Option<String> {
+    if mask.kind != "rectangle" && mask.kind != "ellipse" {
+        return None;
+    }
+    let wf = w.max(2) as f64;
+    let hf = h.max(2) as f64;
+    let cx = mask.x * wf;
+    let cy = mask.y * hf;
+    let hw = (mask.width * wf / 2.0).max(0.5);
+    let hh = (mask.height * hf / 2.0).max(0.5);
+    let feather = (mask.feather * wf.min(hf)).max(0.5);
+    let angle = mask.rotation * std::f64::consts::PI / 180.0;
+    let (sin_a, cos_a) = angle.sin_cos();
+    let dx = format!("(X-{})", fnum(cx));
+    let dy = format!("(Y-{})", fnum(cy));
+    let rx = format!("({}*{}+{}*{})", dx, fnum(cos_a), dy, fnum(sin_a));
+    let ry = format!("(-{}*{}+{}*{})", dx, fnum(sin_a), dy, fnum(cos_a));
+
+    let raw = if mask.kind == "ellipse" {
+        let nx = format!("({}/{})", rx, fnum(hw));
+        let ny = format!("({}/{})", ry, fnum(hh));
+        let scale = hw.min(hh) / feather;
+        format!(
+            "clip((1-sqrt({}*{}+{}*{}))*{}+0.5\\,0\\,1)",
+            nx, nx, ny, ny, fnum(scale)
+        )
+    } else {
+        let scale = 1.0 / feather;
+        let mx = format!(
+            "clip(({}-abs({}))*{}+0.5\\,0\\,1)",
+            fnum(hw), rx, fnum(scale)
+        );
+        let my = format!(
+            "clip(({}-abs({}))*{}+0.5\\,0\\,1)",
+            fnum(hh), ry, fnum(scale)
+        );
+        format!("({}*{})", mx, my)
+    };
+
+    Some(if mask.invert {
+        format!("(1-({}))", raw)
+    } else {
+        raw
+    })
 }
 
 /// FFmpeg audio filter segment for a clip's local DSP settings.
@@ -839,10 +925,12 @@ fn build_video_filters(
     }
 
     // Opacity and transition envelopes are time-varying, so geq is used
-    // whenever either keyframes or transitions are present.
+    // whenever either keyframes or transitions are present. Masks also use
+    // geq so the alpha cutout is exact and padding stays transparent.
     let opacity_kfs = clip.keyframes.get("opacity").cloned().unwrap_or_default();
     let has_transitions = clip.transition_in.is_some() || clip.transition_out.is_some();
-    if opacity_kfs.is_empty() && !has_transitions {
+    let mask_expr = clip.mask.as_ref().and_then(|m| mask_alpha_expr(m, w, h));
+    if opacity_kfs.is_empty() && !has_transitions && mask_expr.is_none() {
         if (clip.opacity - 1.0).abs() > 1e-4 {
             chain.push_str(&format!(",colorchannelmixer=aa={}", fnum(clip.opacity)));
         }
@@ -862,6 +950,9 @@ fn build_video_filters(
                 fnum(clip.duration),
                 fnum(tout.duration)
             );
+        }
+        if let Some(mask) = &mask_expr {
+            alpha = format!("p(X,Y)*(({})*({}))", alpha, mask);
         }
         chain.push_str(&format!(
             ",geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{}'",
@@ -1475,5 +1566,54 @@ mod tests {
     fn audio_dsp_disabled_emits_no_filters() {
         let raw = json!({ "enabled": false, "highpassHz": 90, "compressor": true });
         assert!(audio_dsp_filters(&parse_audio_dsp(Some(&raw))).is_empty());
+    }
+
+    #[test]
+    fn mask_alpha_expr_builds_shapes_and_inversion() {
+        let ellipse = Mask {
+            kind: "ellipse".into(),
+            x: 0.5,
+            y: 0.5,
+            width: 0.5,
+            height: 0.8,
+            rotation: 12.0,
+            feather: 0.05,
+            invert: false,
+        };
+        let expr = mask_alpha_expr(&ellipse, 854, 480).expect("ellipse mask");
+        assert!(expr.contains("sqrt("), "{}", expr);
+        assert!(expr.contains("clip("), "{}", expr);
+
+        let rectangle = Mask { kind: "rectangle".into(), ..ellipse.clone() };
+        let expr = mask_alpha_expr(&rectangle, 854, 480).expect("rectangle mask");
+        assert!(expr.contains("abs("), "{}", expr);
+
+        let inverted = Mask { invert: true, ..ellipse };
+        let expr = mask_alpha_expr(&inverted, 854, 480).expect("inverted mask");
+        assert!(expr.starts_with("(1-("), "{}", expr);
+    }
+
+    #[test]
+    fn parse_mask_requires_shape_and_clamps_values() {
+        assert!(parse_mask(Some(&json!({ "kind": "none" }))).is_none());
+        assert!(parse_mask(Some(&json!({ "kind": "ellipse", "width": 0 }))).is_none());
+        let mask = parse_mask(Some(&json!({
+            "kind": "ellipse",
+            "x": 2,
+            "y": -1,
+            "width": 0.0001,
+            "height": 2,
+            "rotation": 900,
+            "feather": 3,
+            "invert": true
+        })))
+        .expect("valid mask");
+        assert_eq!(mask.x, 1.0);
+        assert_eq!(mask.y, 0.0);
+        assert_eq!(mask.width, 0.01);
+        assert_eq!(mask.height, 1.0);
+        assert_eq!(mask.rotation, 360.0);
+        assert_eq!(mask.feather, 0.5);
+        assert!(mask.invert);
     }
 }

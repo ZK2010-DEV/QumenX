@@ -17,6 +17,7 @@ import {
 } from "@/types/project";
 import { cn } from "@/lib/utils";
 import { applyPreviewAudioDsp, disposePreviewAudioDsp, resolveAudioDsp } from "@/lib/audioDsp";
+import { maskCss } from "@/lib/masks";
 import { IconButton, Segmented } from "@/components/ui/primitives";
 
 interface RenderLayer {
@@ -546,6 +547,7 @@ function PreviewLayerView({ layer, playheadTime, designW, designH, registerRef }
   const clipPath = (crop.top || crop.right || crop.bottom || crop.left)
     ? `inset(${crop.top}px ${crop.right}px ${crop.bottom}px ${crop.left}px)`
     : undefined;
+  const maskStyle = clip.mask ? maskCss(clip.mask, baseW, baseH) : undefined;
 
   const baseStyle: React.CSSProperties = {
     position: "absolute",
@@ -583,6 +585,7 @@ function PreviewLayerView({ layer, playheadTime, designW, designH, registerRef }
           alt={clip.name}
           draggable={false}
           style={{
+            ...maskStyle,
             width: "100%", height: "100%", objectFit: "contain",
             transform: `${clip.flipH ? "scaleX(-1) " : ""}${clip.flipV ? "scaleY(-1)" : ""}`.trim() || undefined,
           }}
@@ -611,6 +614,7 @@ function PreviewLayerView({ layer, playheadTime, designW, designH, registerRef }
           preload={settings.previewQuality === "low" ? "metadata" : "auto"}
           playsInline
           style={{
+            ...maskStyle,
             width: "100%", height: "100%", objectFit: "contain",
             transform: `${clip.flipH ? "scaleX(-1) " : ""}${clip.flipV ? "scaleY(-1)" : ""}`.trim() || undefined,
           }}
