@@ -29,7 +29,7 @@ This log records completed development milestones for QumenX. Entries are added 
 
 ## Milestone 3 — timeline rendering performance
 
-- **Commit:** `PENDING`
+- **Commit:** `2379fa94b5eed70ba5bfc260c98a9de400fc7d44`
 - **Message:** `Reduce timeline render work during playback`
 - **Date:** 2026-11-24
 - **Scope:** Replaced the timeline's whole-store subscription with a shallow selector that excludes per-frame playhead time, moved the playhead into an isolated component, and collapsed waveform rendering to a single SVG path per audio clip with 96 buckets instead of 160+ rectangles.
